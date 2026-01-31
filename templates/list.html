@@ -1,0 +1,17 @@
+{{define "content"}}
+  {{if not .Posts}}
+    <div class="card">No posts yet.</div>
+  {{else}}
+    {{range .Posts}}
+      <article class="card">
+        <h2><a href="{{$.RoutePrefix}}/{{.Slug}}">{{.Title}}</a></h2>
+        {{if .PublishedAt}}<p style="color:#6b7280;">Published {{.PublishedAt.Format "Jan 2, 2006"}}</p>{{end}}
+        {{if .MetaDescription}}<p>{{.MetaDescription}}</p>{{end}}
+      </article>
+    {{end}}
+  {{end}}
+{{end}}
+
+{{define "list.html"}}
+  {{template "base.html" .}}
+{{end}}

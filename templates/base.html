@@ -1,0 +1,44 @@
+{{define "base.html"}}
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>{{if .Post}}{{.Post.Title}}{{else}}Blog{{end}}</title>
+  {{if .Post}}
+    <meta name="description" content="{{.Post.MetaDescription}}">
+    <meta property="og:title" content="{{.Post.Title}}">
+    <meta property="og:description" content="{{.Post.MetaDescription}}">
+    <meta property="twitter:card" content="summary">
+    <script type="application/ld+json">{
+      "@context": "https://schema.org",
+      "@type": "BlogPosting",
+      "headline": {{printf "%q" .Post.Title}},
+      "description": {{printf "%q" .Post.MetaDescription}}
+    }</script>
+  {{end}}
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/modern-normalize/modern-normalize.css">
+  {{range .CustomCSS}}
+    <link rel="stylesheet" href="{{.}}">
+  {{end}}
+  <style>
+    body { font-family: "Helvetica Neue", Arial, sans-serif; margin: 0; background: #f7f7f7; color: #1f2933; }
+    header { padding: 18px 24px; background: #0f172a; color: white; }
+    a { color: #2563eb; text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    .container { max-width: 900px; margin: 24px auto; padding: 0 16px; }
+    .card { background: white; padding: 20px; border-radius: 8px; box-shadow: 0 1px 4px rgba(0,0,0,0.06); margin-bottom: 16px; }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="container">
+      <a href="{{.RoutePrefix}}/" style="color:white;font-weight:600;font-size:18px;">Blog</a>
+    </div>
+  </header>
+  <main class="container">
+    {{block "content" .}}{{end}}
+  </main>
+</body>
+</html>
+{{end}}

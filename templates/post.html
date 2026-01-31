@@ -1,0 +1,11 @@
+{{define "content"}}
+  <article class="card">
+    <h1>{{.Post.Title}}</h1>
+    {{if .Post.PublishedAt}}<p style="color:#6b7280;">Published {{.Post.PublishedAt.Format "Jan 2, 2006"}}</p>{{end}}
+    <div>{{safeHTML .Post.ContentHTML}}</div>
+  </article>
+{{end}}
+
+{{define "post.html"}}
+  {{template "base.html" .}}
+{{end}}

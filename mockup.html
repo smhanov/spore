@@ -1,0 +1,608 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Blog Admin 2026</title>
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- Google Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    
+    <!-- Phosphor Icons -->
+    <script src="https://unpkg.com/@phosphor-icons/web"></script>
+
+    <!-- Vue 3 -->
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+
+    <!-- Marked.js for Markdown Rendering -->
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    
+    <!-- DOMPurify for sanitizing HTML -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.0.6/purify.min.js"></script>
+
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: {
+                        sans: ['"Plus Jakarta Sans"', 'sans-serif'],
+                    },
+                    colors: {
+                        brand: {
+                            50: '#eff4ff',
+                            100: '#dbe6fe',
+                            200: '#bfd3fe',
+                            300: '#93bbfd',
+                            400: '#609afa',
+                            500: '#3b82f6',
+                            600: '#2563eb',
+                            700: '#1d4ed8',
+                            800: '#1e40af',
+                            900: '#1e3a8a',
+                        },
+                        surface: '#f8fafc',
+                    }
+                }
+            }
+        }
+    </script>
+
+    <style>
+        /* Custom Scrollbar */
+        ::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
+        }
+        ::-webkit-scrollbar-track {
+            background: transparent;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #cbd5e1;
+            border-radius: 4px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #94a3b8;
+        }
+        
+        .glass-panel {
+            background: rgba(255, 255, 255, 0.7);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.5);
+        }
+
+        .markdown-body h1 { font-size: 2em; font-weight: 700; margin-bottom: 0.5em; }
+        .markdown-body h2 { font-size: 1.5em; font-weight: 600; margin-bottom: 0.5em; margin-top: 1em; }
+        .markdown-body p { margin-bottom: 1em; line-height: 1.6; color: #334155; }
+        .markdown-body ul { list-style-type: disc; padding-left: 1.5em; margin-bottom: 1em; }
+        .markdown-body blockquote { border-left: 4px solid #e2e8f0; padding-left: 1em; color: #64748b; font-style: italic; }
+        .markdown-body code { background: #f1f5f9; padding: 0.2em 0.4em; border-radius: 0.25em; font-family: monospace; font-size: 0.9em; color: #db2777; }
+        .markdown-body pre { background: #1e293b; color: #f8fafc; padding: 1em; border-radius: 0.5em; overflow-x: auto; margin-bottom: 1em; }
+        .markdown-body pre code { background: transparent; color: inherit; padding: 0; }
+        .markdown-body img { max-width: 100%; border-radius: 0.5em; }
+
+        .editor-textarea {
+            font-family: 'Menlo', 'Monaco', 'Courier New', monospace;
+            line-height: 1.6;
+        }
+        
+        /* Transition for list items */
+        .list-move,
+        .list-enter-active,
+        .list-leave-active {
+            transition: all 0.4s ease;
+        }
+        .list-enter-from,
+        .list-leave-to {
+            opacity: 0;
+            transform: translateY(20px);
+        }
+        .list-leave-active {
+            position: absolute;
+        }
+    </style>
+</head>
+<body class="bg-surface text-slate-800 antialiased h-screen overflow-hidden selection:bg-brand-100 selection:text-brand-900">
+
+    <div id="app" class="h-full flex flex-col md:flex-row relative">
+        
+        <!-- Mobile Header -->
+        <header class="md:hidden flex items-center justify-between p-4 glass-panel sticky top-0 z-20">
+            <div class="flex items-center gap-2">
+                <div class="w-8 h-8 rounded-lg bg-brand-600 flex items-center justify-center text-white">
+                    <i class="ph ph-hexagon text-xl"></i>
+                </div>
+                <span class="font-bold text-lg tracking-tight">NexusCMS</span>
+            </div>
+            <button @click="sidebarOpen = !sidebarOpen" class="p-2 text-slate-600 hover:bg-slate-100 rounded-full transition-colors">
+                <i class="ph ph-list text-2xl"></i>
+            </button>
+        </header>
+
+        <!-- Sidebar Navigation -->
+        <aside :class="[
+            'fixed md:static inset-y-0 left-0 z-30 w-64 bg-white/80 md:bg-white/50 backdrop-blur-xl border-r border-slate-200/60 transform transition-transform duration-300 ease-in-out flex flex-col',
+            sidebarOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'
+        ]">
+            <div class="p-6 hidden md:flex items-center gap-3 mb-6">
+                <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-brand-500 to-indigo-600 flex items-center justify-center text-white shadow-lg shadow-brand-500/30">
+                    <i class="ph ph-hexagon-fill text-2xl"></i>
+                </div>
+                <div>
+                    <h1 class="font-bold text-xl tracking-tight text-slate-900">Nexus</h1>
+                    <p class="text-xs text-slate-500 font-medium">v4.2.0 Admin</p>
+                </div>
+            </div>
+
+            <nav class="flex-1 px-4 space-y-1 overflow-y-auto">
+                <p class="px-2 text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2 mt-4">Content</p>
+                
+                <a href="#" @click.prevent="currentView = 'list'; sidebarOpen = false" 
+                   :class="['flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all duration-200 group', 
+                   currentView === 'list' ? 'bg-brand-50 text-brand-700 shadow-sm ring-1 ring-brand-100' : 'text-slate-600 hover:bg-white hover:shadow-sm']">
+                    <i :class="['ph text-lg', currentView === 'list' ? 'ph-article-ny-times-fill' : 'ph-article-ny-times']"></i>
+                    All Posts
+                    <span class="ml-auto text-xs font-bold px-2 py-0.5 rounded-full" 
+                          :class="currentView === 'list' ? 'bg-brand-100 text-brand-700' : 'bg-slate-100 text-slate-500'">
+                        {{ posts.length }}
+                    </span>
+                </a>
+
+                <a href="#" class="flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium text-slate-600 hover:bg-white hover:shadow-sm transition-all duration-200 group">
+                    <i class="ph ph-image text-lg"></i>
+                    Media Library
+                </a>
+
+                <p class="px-2 text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2 mt-8">System</p>
+                
+                <a href="#" class="flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium text-slate-600 hover:bg-white hover:shadow-sm transition-all duration-200 group">
+                    <i class="ph ph-gear text-lg"></i>
+                    Settings
+                </a>
+            </nav>
+
+            <div class="p-4 border-t border-slate-200/60">
+                <button class="flex items-center gap-3 w-full p-2 rounded-xl hover:bg-white hover:shadow-sm transition-all">
+                    <img src="https://api.dicebear.com/7.x/avataaars/svg?seed=Felix" class="w-8 h-8 rounded-full bg-slate-100" alt="Avatar">
+                    <div class="text-left flex-1 min-w-0">
+                        <p class="text-sm font-semibold text-slate-900 truncate">Alex Designer</p>
+                        <p class="text-xs text-slate-500 truncate">alex@nexus.com</p>
+                    </div>
+                    <i class="ph ph-caret-right text-slate-400"></i>
+                </button>
+            </div>
+        </aside>
+
+        <!-- Overlay for mobile sidebar -->
+        <div v-if="sidebarOpen" @click="sidebarOpen = false" class="fixed inset-0 bg-slate-900/20 backdrop-blur-sm z-20 md:hidden"></div>
+
+        <!-- Main Content Area -->
+        <main class="flex-1 overflow-hidden relative flex flex-col bg-slate-50/50">
+            
+            <!-- VIEW: POST LIST -->
+            <div v-if="currentView === 'list'" class="h-full flex flex-col">
+                <!-- Top Toolbar -->
+                <div class="p-4 md:p-8 pb-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                    <div>
+                        <h2 class="text-2xl font-bold text-slate-900">Posts</h2>
+                        <p class="text-slate-500 text-sm mt-1">Manage and publish your blog content</p>
+                    </div>
+                    <button @click="createNewPost" class="bg-slate-900 hover:bg-slate-800 text-white px-5 py-2.5 rounded-xl text-sm font-medium shadow-lg shadow-slate-900/20 flex items-center gap-2 transition-all active:scale-95 w-full sm:w-auto justify-center">
+                        <i class="ph ph-plus-bold"></i> New Post
+                    </button>
+                </div>
+
+                <!-- Filters & Search -->
+                <div class="px-4 md:px-8 pb-6">
+                    <div class="flex flex-col sm:flex-row gap-3">
+                        <div class="relative flex-1">
+                            <i class="ph ph-magnifying-glass absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"></i>
+                            <input v-model="searchQuery" type="text" placeholder="Search posts..." class="w-full pl-10 pr-4 py-2.5 bg-white border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500 transition-all shadow-sm">
+                        </div>
+                        <div class="flex gap-2 overflow-x-auto pb-1 sm:pb-0">
+                            <button @click="filterStatus = 'all'" 
+                                :class="['px-4 py-2.5 rounded-xl text-sm font-medium whitespace-nowrap transition-all border', filterStatus === 'all' ? 'bg-white border-slate-200 text-slate-900 shadow-sm' : 'border-transparent text-slate-500 hover:bg-white hover:text-slate-700']">
+                                All Posts
+                            </button>
+                            <button @click="filterStatus = 'published'"
+                                :class="['px-4 py-2.5 rounded-xl text-sm font-medium whitespace-nowrap transition-all border', filterStatus === 'published' ? 'bg-emerald-50 border-emerald-100 text-emerald-700 shadow-sm' : 'border-transparent text-slate-500 hover:bg-white hover:text-slate-700']">
+                                Published
+                            </button>
+                            <button @click="filterStatus = 'draft'"
+                                :class="['px-4 py-2.5 rounded-xl text-sm font-medium whitespace-nowrap transition-all border', filterStatus === 'draft' ? 'bg-amber-50 border-amber-100 text-amber-700 shadow-sm' : 'border-transparent text-slate-500 hover:bg-white hover:text-slate-700']">
+                                Drafts
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- List Content -->
+                <div class="flex-1 overflow-y-auto px-4 md:px-8 pb-8">
+                    <div v-if="filteredPosts.length === 0" class="flex flex-col items-center justify-center h-64 text-slate-400">
+                        <i class="ph ph-files text-4xl mb-3 opacity-50"></i>
+                        <p>No posts found matching your criteria.</p>
+                    </div>
+
+                    <transition-group name="list" tag="div" class="space-y-3">
+                        <div v-for="post in filteredPosts" :key="post.id" 
+                             class="group bg-white rounded-2xl p-4 border border-slate-200/60 shadow-sm hover:shadow-md hover:border-brand-200 transition-all duration-300 relative overflow-hidden">
+                            
+                            <!-- Card Body -->
+                            <div class="flex flex-col md:flex-row gap-4 items-start md:items-center">
+                                <!-- Status Indicator -->
+                                <div class="w-12 h-12 rounded-xl flex items-center justify-center shrink-0"
+                                     :class="post.published ? 'bg-emerald-50 text-emerald-600' : 'bg-amber-50 text-amber-600'">
+                                    <i :class="['text-xl ph', post.published ? 'ph-check-circle-fill' : 'ph-pencil-simple-slash-fill']"></i>
+                                </div>
+
+                                <div class="flex-1 min-w-0">
+                                    <div class="flex items-center gap-2 mb-1">
+                                        <h3 class="font-bold text-slate-900 truncate text-lg group-hover:text-brand-600 transition-colors">{{ post.title }}</h3>
+                                    </div>
+                                    <div class="flex flex-wrap items-center gap-x-4 gap-y-2 text-xs text-slate-500 font-medium">
+                                        <span class="flex items-center gap-1">
+                                            <i class="ph ph-user"></i> {{ post.author }}
+                                        </span>
+                                        <span class="flex items-center gap-1">
+                                            <i class="ph ph-calendar-blank"></i> {{ formatDate(post.date) }}
+                                        </span>
+                                        <span class="flex items-center gap-1 font-mono text-slate-400 bg-slate-50 px-1.5 py-0.5 rounded">
+                                            /{{ post.slug }}
+                                        </span>
+                                    </div>
+                                </div>
+
+                                <!-- Actions -->
+                                <div class="flex items-center gap-2 w-full md:w-auto mt-2 md:mt-0 pt-3 md:pt-0 border-t md:border-t-0 border-slate-100">
+                                    <button @click="editPost(post)" class="flex-1 md:flex-none py-2 md:py-1.5 px-4 rounded-lg bg-slate-50 text-slate-600 hover:bg-brand-50 hover:text-brand-600 text-sm font-medium transition-colors">
+                                        Edit
+                                    </button>
+                                    <button @click="deletePost(post.id)" class="p-2 rounded-lg text-slate-400 hover:bg-rose-50 hover:text-rose-600 transition-colors">
+                                        <i class="ph ph-trash text-lg"></i>
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </transition-group>
+                </div>
+            </div>
+
+            <!-- VIEW: POST EDITOR -->
+            <div v-else class="h-full flex flex-col bg-white">
+                
+                <!-- Editor Toolbar -->
+                <div class="h-16 border-b border-slate-200 flex items-center justify-between px-4 md:px-6 bg-white z-10">
+                    <div class="flex items-center gap-3">
+                        <button @click="confirmBack" class="p-2 -ml-2 text-slate-400 hover:text-slate-800 hover:bg-slate-100 rounded-full transition-colors">
+                            <i class="ph ph-arrow-left text-xl"></i>
+                        </button>
+                        <div class="h-6 w-px bg-slate-200 hidden md:block"></div>
+                        <span class="text-sm font-semibold text-slate-500 hidden md:block">
+                            {{ isNewPost ? 'New Post' : 'Editing Post' }}
+                        </span>
+                        
+                        <!-- Mobile View Toggle -->
+                        <div class="md:hidden flex bg-slate-100 p-1 rounded-lg">
+                            <button @click="editorMode = 'write'" 
+                                :class="['px-3 py-1 rounded-md text-xs font-semibold transition-all', editorMode === 'write' ? 'bg-white shadow-sm text-slate-900' : 'text-slate-500']">
+                                Write
+                            </button>
+                            <button @click="editorMode = 'preview'" 
+                                :class="['px-3 py-1 rounded-md text-xs font-semibold transition-all', editorMode === 'preview' ? 'bg-white shadow-sm text-slate-900' : 'text-slate-500']">
+                                Preview
+                            </button>
+                        </div>
+                    </div>
+
+                    <div class="flex items-center gap-3">
+                        <div class="flex items-center gap-2 mr-2">
+                            <span class="text-xs font-semibold text-slate-500 uppercase hidden sm:block">Published</span>
+                            <button @click="draftPost.published = !draftPost.published" 
+                                :class="['w-11 h-6 rounded-full relative transition-colors duration-300 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-brand-500', draftPost.published ? 'bg-emerald-500' : 'bg-slate-300']">
+                                <span :class="['absolute top-1 left-1 w-4 h-4 bg-white rounded-full shadow-sm transition-transform duration-300', draftPost.published ? 'translate-x-5' : 'translate-x-0']"></span>
+                            </button>
+                        </div>
+                        <button @click="savePost" class="bg-slate-900 hover:bg-slate-800 text-white px-5 py-2 rounded-xl text-sm font-bold shadow-lg shadow-slate-900/20 transition-all active:scale-95">
+                            Save Changes
+                        </button>
+                    </div>
+                </div>
+
+                <div class="flex-1 flex overflow-hidden">
+                    
+                    <!-- Editor Main Area -->
+                    <div class="flex-1 flex flex-col h-full overflow-hidden relative">
+                        <!-- Meta Fields (Collapsible on mobile maybe, currently fixed top) -->
+                        <div class="border-b border-slate-100 p-4 md:px-8 md:pt-8 md:pb-4 space-y-4 bg-white">
+                            <input v-model="draftPost.title" @input="autoSlug" type="text" placeholder="Post Title" 
+                                   class="w-full text-2xl md:text-3xl font-bold placeholder-slate-300 border-none focus:ring-0 p-0 text-slate-900 bg-transparent">
+                            
+                            <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                <div class="flex items-center gap-2 text-slate-500 border-b border-slate-100 pb-1 focus-within:border-brand-500 transition-colors">
+                                    <i class="ph ph-link text-lg"></i>
+                                    <span class="text-xs font-mono text-slate-400">/</span>
+                                    <input v-model="draftPost.slug" type="text" placeholder="url-slug" class="w-full text-sm font-mono bg-transparent border-none focus:ring-0 p-0 text-slate-600">
+                                </div>
+                                
+                                <!-- Author Input -->
+                                <div class="flex items-center gap-2 text-slate-500 border-b border-slate-100 pb-1 focus-within:border-brand-500 transition-colors">
+                                    <i class="ph ph-user text-lg"></i>
+                                    <input v-model="draftPost.author" type="text" placeholder="Author Name" class="w-full text-sm bg-transparent border-none focus:ring-0 p-0 text-slate-600 placeholder-slate-400">
+                                </div>
+
+                                <!-- Date Input -->
+                                <div class="flex items-center gap-2 text-slate-500 border-b border-slate-100 pb-1 focus-within:border-brand-500 transition-colors">
+                                    <i class="ph ph-calendar-blank text-lg"></i>
+                                    <input v-model="draftPost.date" type="date" class="w-full text-sm bg-transparent border-none focus:ring-0 p-0 text-slate-600 placeholder-slate-400 font-sans">
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Split View Container -->
+                        <div class="flex-1 flex overflow-hidden">
+                            <!-- Markdown Input -->
+                            <div v-show="editorMode === 'write' || isDesktop" class="flex-1 flex flex-col border-r border-slate-200 h-full relative group">
+                                <div class="absolute top-2 right-4 z-10 text-xs font-bold text-slate-300 uppercase tracking-widest pointer-events-none">Markdown</div>
+                                <textarea v-model="draftPost.content" 
+                                    class="w-full h-full p-4 md:p-8 resize-none focus:outline-none editor-textarea text-slate-700 bg-white"
+                                    placeholder="Start writing your story..."></textarea>
+                            </div>
+                            
+                            <!-- Preview Output -->
+                            <div v-show="editorMode === 'preview' || isDesktop" class="flex-1 h-full overflow-y-auto bg-slate-50 p-4 md:p-8">
+                                <div class="max-w-prose mx-auto">
+                                    <div class="text-xs font-bold text-slate-300 uppercase tracking-widest mb-4 text-right">Preview</div>
+                                    <div class="markdown-body" v-html="compiledMarkdown"></div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Right Sidebar (Settings) - Desktop Only -->
+                    <div class="w-72 border-l border-slate-200 bg-white hidden lg:flex flex-col overflow-y-auto">
+                        <div class="p-4 border-b border-slate-100">
+                            <h3 class="font-bold text-sm text-slate-900">SEO & Settings</h3>
+                        </div>
+                        
+                        <div class="p-4 space-y-6">
+                            <!-- SEO Description -->
+                            <div class="space-y-2">
+                                <label class="text-xs font-semibold text-slate-500 uppercase">
+                                    SEO Description
+                                    <span :class="['ml-1', seoLengthColor]">{{ draftPost.description.length }}/160</span>
+                                </label>
+                                <textarea v-model="draftPost.description" rows="4" 
+                                    class="w-full text-sm p-3 border border-slate-200 rounded-lg focus:border-brand-500 focus:ring-1 focus:ring-brand-500 outline-none transition-all resize-none text-slate-600 leading-relaxed"
+                                    placeholder="Enter a meta description..."></textarea>
+                            </div>
+
+                             <!-- Tags Mockup -->
+                             <div class="space-y-2">
+                                <label class="text-xs font-semibold text-slate-500 uppercase">Tags</label>
+                                <div class="flex flex-wrap gap-2">
+                                    <span class="px-2 py-1 bg-brand-50 text-brand-600 rounded-md text-xs font-bold flex items-center gap-1">
+                                        Technology <i class="ph ph-x cursor-pointer"></i>
+                                    </span>
+                                    <span class="px-2 py-1 bg-slate-100 text-slate-500 rounded-md text-xs font-bold flex items-center gap-1 cursor-pointer hover:bg-slate-200">
+                                        <i class="ph ph-plus"></i> Add
+                                    </span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                </div>
+            </div>
+
+        </main>
+    </div>
+
+    <script>
+        const { createApp, ref, computed, onMounted, onUnmounted, watch } = Vue;
+
+        createApp({
+            setup() {
+                // --- State ---
+                const sidebarOpen = ref(false);
+                const currentView = ref('list'); // 'list' or 'editor'
+                const editorMode = ref('write'); // 'write' or 'preview'
+                const searchQuery = ref('');
+                const filterStatus = ref('all'); // 'all', 'published', 'draft'
+                const windowWidth = ref(window.innerWidth);
+
+                // Sample Data
+                const posts = ref([
+                    {
+                        id: 1,
+                        title: "The Future of JAMstack in 2026",
+                        slug: "future-of-jamstack-2026",
+                        author: "Sarah Jenks",
+                        date: "2026-03-15",
+                        published: true,
+                        description: "Exploring edge functions, server components, and the new wave of static site generation.",
+                        content: "# The Future of JAMstack\n\nJAMstack has evolved significantly...\n\n## Key Takeaways\n- Edge computing is standard\n- Serverless is instant\n\n> The web is faster than ever."
+                    },
+                    {
+                        id: 2,
+                        title: "Designing for Foldable Devices",
+                        slug: "designing-foldable-devices",
+                        author: "Mike Ross",
+                        date: "2026-02-28",
+                        published: true,
+                        description: "CSS media queries for dual-screen layouts are now essential for modern responsive design.",
+                        content: "Foldable devices have reached mass adoption. Here is how we design for them..."
+                    },
+                    {
+                        id: 3,
+                        title: "Vue 4: What we know so far",
+                        slug: "vue-4-rumors",
+                        author: "Alex Designer",
+                        date: "2026-04-01",
+                        published: false,
+                        description: "A deep dive into the proposed reactivity system changes coming in the next major version.",
+                        content: "Is it too early to talk about Vue 4? Maybe. But let's look at the RFCs..."
+                    }
+                ]);
+
+                // Editor State
+                const draftPost = ref({
+                    id: null,
+                    title: '',
+                    slug: '',
+                    author: '',
+                    date: '',
+                    published: false,
+                    description: '',
+                    content: ''
+                });
+
+                // --- Computed ---
+                const isDesktop = computed(() => windowWidth.value >= 1024);
+                
+                const isNewPost = computed(() => !draftPost.value.id);
+
+                const compiledMarkdown = computed(() => {
+                    const rawHtml = marked.parse(draftPost.value.content || '');
+                    return DOMPurify.sanitize(rawHtml);
+                });
+
+                const filteredPosts = computed(() => {
+                    return posts.value.filter(post => {
+                        const matchesSearch = post.title.toLowerCase().includes(searchQuery.value.toLowerCase()) || 
+                                              post.author.toLowerCase().includes(searchQuery.value.toLowerCase());
+                        
+                        if (filterStatus.value === 'all') return matchesSearch;
+                        if (filterStatus.value === 'published') return matchesSearch && post.published;
+                        if (filterStatus.value === 'draft') return matchesSearch && !post.published;
+                        return matchesSearch;
+                    });
+                });
+
+                const seoLengthColor = computed(() => {
+                    const len = draftPost.value.description.length;
+                    if (len > 160) return 'text-rose-500 font-bold';
+                    if (len > 140) return 'text-amber-500';
+                    return 'text-slate-400';
+                });
+
+                // --- Methods ---
+                const formatDate = (dateStr) => {
+                    if (!dateStr) return 'No Date';
+                    return new Date(dateStr).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+                };
+
+                const createNewPost = () => {
+                    draftPost.value = {
+                        id: null,
+                        title: '',
+                        slug: '',
+                        author: 'Alex Designer', // Default current user
+                        date: new Date().toISOString().split('T')[0],
+                        published: false,
+                        description: '',
+                        content: ''
+                    };
+                    currentView.value = 'editor';
+                    editorMode.value = 'write';
+                };
+
+                const editPost = (post) => {
+                    // Deep copy to avoid editing directly in list before save
+                    draftPost.value = JSON.parse(JSON.stringify(post));
+                    currentView.value = 'editor';
+                    editorMode.value = 'write';
+                };
+
+                const savePost = () => {
+                    if (!draftPost.value.title) {
+                        alert("Title is required");
+                        return;
+                    }
+
+                    if (draftPost.value.id) {
+                        // Update existing
+                        const index = posts.value.findIndex(p => p.id === draftPost.value.id);
+                        if (index !== -1) {
+                            posts.value[index] = { ...draftPost.value };
+                        }
+                    } else {
+                        // Create new
+                        const newId = Math.max(...posts.value.map(p => p.id), 0) + 1;
+                        posts.value.unshift({ ...draftPost.value, id: newId });
+                    }
+                    currentView.value = 'list';
+                };
+
+                const deletePost = (id) => {
+                    if(confirm("Are you sure you want to delete this post?")) {
+                        posts.value = posts.value.filter(p => p.id !== id);
+                    }
+                };
+
+                const confirmBack = () => {
+                    // Simple check for unsaved changes could go here
+                    currentView.value = 'list';
+                };
+
+                const slugify = (text) => {
+                    return text.toString().toLowerCase()
+                        .replace(/\s+/g, '-')           // Replace spaces with -
+                        .replace(/[^\w\-]+/g, '')       // Remove all non-word chars
+                        .replace(/\-\-+/g, '-')         // Replace multiple - with single -
+                        .replace(/^-+/, '')             // Trim - from start of text
+                        .replace(/-+$/, '');            // Trim - from end of text
+                };
+
+                const autoSlug = () => {
+                    if (isNewPost.value || !draftPost.value.slug) {
+                        draftPost.value.slug = slugify(draftPost.value.title);
+                    }
+                };
+
+                // --- Lifecycle & Watchers ---
+                const handleResize = () => {
+                    windowWidth.value = window.innerWidth;
+                };
+
+                onMounted(() => {
+                    window.addEventListener('resize', handleResize);
+                    // Configure Marked
+                    marked.setOptions({
+                        breaks: true,
+                        gfm: true
+                    });
+                });
+
+                onUnmounted(() => {
+                    window.removeEventListener('resize', handleResize);
+                });
+
+                return {
+                    sidebarOpen,
+                    currentView,
+                    editorMode,
+                    searchQuery,
+                    filterStatus,
+                    posts,
+                    filteredPosts,
+                    draftPost,
+                    isDesktop,
+                    isNewPost,
+                    compiledMarkdown,
+                    seoLengthColor,
+                    formatDate,
+                    createNewPost,
+                    editPost,
+                    savePost,
+                    deletePost,
+                    confirmBack,
+                    autoSlug
+                };
+            }
+        }).mount('#app');
+    </script>
+</body>
+</html>
