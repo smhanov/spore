@@ -264,10 +264,8 @@ func (s *service) commentsEnabled(r *http.Request) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	if settings == nil {
-		return true, nil
-	}
-	return settings.CommentsEnabled, nil
+	resolved := resolveBlogSettings(settings)
+	return resolved.CommentsEnabled, nil
 }
 
 func (s *service) ownerTokenHash(r *http.Request) string {

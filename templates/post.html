@@ -1,52 +1,62 @@
 {{define "content"}}
-<article class="card">
-  <h1>{{.Post.Title}}</h1>
-  {{if .Post.PublishedAt}}
-  <p style="color: #6b7280">
-    Published {{.Post.PublishedAt.Format "Jan 2, 2006"}}
-  </p>
-  {{end}}
-  {{if .Post.Tags}}
-  <div class="post-tags">
-    {{range .Post.Tags}}
-      <a href="{{$.RoutePrefix}}/tag/{{.Slug}}" class="tag-pill">{{.Name}}</a>
+<div class="post-layout">
+  <article class="card post-main">
+    <h1>{{.Post.Title}}</h1>
+    {{if .Post.PublishedAt}}
+    <p style="color: #6b7280">
+      {{formatPublishedDate .Post.PublishedAt $.DateDisplay}}
+    </p>
     {{end}}
-  </div>
-  {{end}}
-  <div>{{safeHTML .Post.ContentHTML}}</div>
-</article>
-
-{{if .RelatedPosts}}
-<section class="related-posts">
-  <h2>Related Posts</h2>
-  <div class="related-grid">
-    {{range .RelatedPosts}}
-    <a href="{{$.RoutePrefix}}/{{.Slug}}" class="related-card">
-      {{if .FirstImage}}
-      <div class="related-image" style="background-image: url('{{.FirstImage}}')"></div>
-      {{else}}
-      <div class="related-image related-image-placeholder">
-        <span>📝</span>
-      </div>
+    {{if .Post.Tags}}
+    <div class="post-tags">
+      {{range .Post.Tags}}
+        <a href="{{$.RoutePrefix}}/tag/{{.Slug}}" class="tag-pill">{{.Name}}</a>
       {{end}}
-      <div class="related-body">
-        <h3>{{.Title}}</h3>
-        {{if .Excerpt}}<p>{{.Excerpt}}</p>{{end}}
-        {{if .Tags}}
-        <div class="related-tags">
-          {{range .Tags}}
-            <span class="tag-pill-sm">{{.Name}}</span>
-          {{end}}
+    </div>
+    {{end}}
+    <div class="post-content">{{safeHTML .Post.ContentHTML}}</div>
+  </article>
+
+  {{if .RelatedPosts}}
+  <section class="related-posts">
+    <h2>Related Posts</h2>
+    <div class="related-grid">
+      {{range .RelatedPosts}}
+      <a href="{{$.RoutePrefix}}/{{.Slug}}" class="related-card">
+        {{if .FirstImage}}
+        <div class="related-image" style="background-image: url('{{.FirstImage}}')"></div>
+        {{else}}
+        <div class="related-image related-image-placeholder">
+          <span>📝</span>
         </div>
         {{end}}
-      </div>
-    </a>
-    {{end}}
-  </div>
-</section>
-{{end}}
+        <div class="related-body">
+          <h3>{{.Title}}</h3>
+          {{if .Excerpt}}<p>{{.Excerpt}}</p>{{end}}
+          {{if .Tags}}
+          <div class="related-tags">
+            {{range .Tags}}
+              <span class="tag-pill-sm">{{.Name}}</span>
+            {{end}}
+          </div>
+          {{end}}
+        </div>
+      </a>
+      {{end}}
+    </div>
+  </section>
+  {{end}}
+</div>
 
 <style>
+  .post-layout {
+    display: flex;
+    flex-direction: column;
+    gap: 24px;
+  }
+  .post-main {
+    flex: 1;
+  }
   .post-tags {
     display: flex;
     flex-wrap: wrap;
@@ -69,7 +79,11 @@
     text-decoration: none;
   }
   .related-posts {
-    margin: 40px 0 20px;
+    margin: 0 0 20px;
+  }
+  .post-content img {
+    max-width: 100%;
+    height: auto;
   }
   .related-posts h2 {
     font-size: 22px;
@@ -143,6 +157,19 @@
     border-radius: 999px;
   }
   @media (max-width: 640px) {
+    .related-grid {
+      grid-template-columns: 1fr;
+    }
+  }
+  @media (min-width: 1024px) {
+    .post-layout {
+      flex-direction: row;
+      align-items: flex-start;
+    }
+    .related-posts {
+      width: 320px;
+      flex: 0 0 320px;
+    }
     .related-grid {
       grid-template-columns: 1fr;
     }
@@ -630,6 +657,7 @@
 
       if (action === "edit") {
         editingId = comment.id;
+        nameInput.value = comment.author_name || "";
         contentInput.value = comment.content;
         submitButton.textContent = "Save changes";
         cancelButton.hidden = false;

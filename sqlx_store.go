@@ -60,6 +60,7 @@ CREATE TABLE IF NOT EXISTS blog_ai_settings (
 CREATE TABLE IF NOT EXISTS blog_settings (
 	id INTEGER PRIMARY KEY CHECK (id = 1),
 	comments_enabled BOOLEAN NOT NULL DEFAULT TRUE,
+	date_display TEXT NOT NULL DEFAULT 'absolute',
 	updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 `
@@ -350,12 +351,15 @@ INSERT INTO blog_ai_settings (
 
 func (s *SQLXStore) GetBlogSettings(ctx context.Context) (*BlogSettings, error) {
 	var settings BlogSettings
-	err := s.DB.GetContext(ctx, &settings, `SELECT comments_enabled FROM blog_settings WHERE id = 1`)
+	err := s.DB.GetContext(ctx, &settings, `SELECT comments_enabled, date_display FROM blog_settings WHERE id = 1`)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, nil
 		}
 		return nil, err
+	}
+	if settings.DateDisplay == "" {
+		settings.DateDisplay = "absolute"
 	}
 	return &settings, nil
 }
@@ -365,12 +369,13 @@ func (s *SQLXStore) UpdateBlogSettings(ctx context.Context, settings *BlogSettin
 		return fmt.Errorf("blog settings required")
 	}
 	_, err := s.DB.ExecContext(ctx, `
-INSERT INTO blog_settings (id, comments_enabled)
-VALUES (1, $1)
+INSERT INTO blog_settings (id, comments_enabled, date_display)
+VALUES (1, $1, $2)
 ON CONFLICT(id) DO UPDATE SET
     comments_enabled = excluded.comments_enabled,
+    date_display = excluded.date_display,
     updated_at = CURRENT_TIMESTAMP
-`, settings.CommentsEnabled)
+`, settings.CommentsEnabled, settings.DateDisplay)
 	return err
 }
 

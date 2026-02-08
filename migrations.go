@@ -32,4 +32,11 @@ var migrations = []migration{
 			SchemaBlogComments,
 		},
 	},
+	{
+		Version: 4,
+		Name:    "add date display setting",
+		Statements: []string{
+			"ALTER TABLE blog_settings ADD COLUMN date_display TEXT NOT NULL DEFAULT 'absolute'",
+		},
+	},
 }

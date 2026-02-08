@@ -84,7 +84,8 @@ func NewHandler(cfg Config) (http.Handler, error) {
 
 func parseTemplates(cfg Config) (map[string]*template.Template, error) {
 	funcMap := template.FuncMap{
-		"safeHTML": func(s string) template.HTML { return template.HTML(s) },
+		"safeHTML":            func(s string) template.HTML { return template.HTML(s) },
+		"formatPublishedDate": formatPublishedDate,
 	}
 
 	build := func(extra ...string) (*template.Template, error) {

@@ -40,7 +40,8 @@ type AISettings struct {
 
 // BlogSettings stores runtime configuration for the blog.
 type BlogSettings struct {
-	CommentsEnabled bool `json:"comments_enabled" db:"comments_enabled"`
+	CommentsEnabled bool   `json:"comments_enabled" db:"comments_enabled"`
+	DateDisplay     string `json:"date_display" db:"date_display"`
 }
 
 // Comment represents a public comment on a blog post.

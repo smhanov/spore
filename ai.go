@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"regexp"
 	"strings"
@@ -96,6 +97,14 @@ func (s *service) handleAdminAIChat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	log.Printf(
+		"ai chat start mode=%s provider=%s model=%s web_search=%t",
+		mode,
+		strings.ToLower(strings.TrimSpace(providerSettings.Provider)),
+		strings.TrimSpace(providerSettings.Model),
+		req.WebSearch,
+	)
+
 	client, err := newLLMClient(providerSettings, req.WebSearch)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
@@ -103,11 +112,14 @@ func (s *service) handleAdminAIChat(w http.ResponseWriter, r *http.Request) {
 	}
 
 	prompt := buildAIPrompt(req.ContentMarkdown, req.Query)
+	start := time.Now()
 	resp, err := client.Generate(r.Context(), prompt)
 	if err != nil {
+		log.Printf("ai chat failed duration=%s err=%v", time.Since(start), err)
 		http.Error(w, fmt.Sprintf("ai request failed: %v", err), http.StatusBadRequest)
 		return
 	}
+	log.Printf("ai chat done duration=%s", time.Since(start))
 
 	content, notes := parseAIResponse(resp.Text())
 	if strings.TrimSpace(content) == "" {
@@ -288,10 +300,19 @@ func (s *service) checkCommentSpam(ctx context.Context, comment Comment, post Po
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 
+	start := time.Now()
+	log.Printf(
+		"ai spam-check start comment_id=%s provider=%s model=%s",
+		comment.ID,
+		strings.ToLower(strings.TrimSpace(settings.Dumb.Provider)),
+		strings.TrimSpace(settings.Dumb.Model),
+	)
 	resp, err := client.Generate(ctx, prompt)
 	if err != nil {
+		log.Printf("ai spam-check failed comment_id=%s duration=%s err=%v", comment.ID, time.Since(start), err)
 		return false, "", err
 	}
+	log.Printf("ai spam-check done comment_id=%s duration=%s", comment.ID, time.Since(start))
 
 	spam, reason := parseCommentSpamResponse(resp.Text())
 	return spam, reason, nil
@@ -404,10 +425,19 @@ func (s *service) generatePostTags(postID string) {
 		}
 
 		prompt := buildTaggingPrompt(post.Title, post.ContentMarkdown)
+		start := time.Now()
+		log.Printf(
+			"ai tagger start post_id=%s provider=%s model=%s",
+			post.ID,
+			strings.ToLower(strings.TrimSpace(settings.Dumb.Provider)),
+			strings.TrimSpace(settings.Dumb.Model),
+		)
 		resp, err := client.Generate(ctx, prompt)
 		if err != nil {
+			log.Printf("ai tagger failed post_id=%s duration=%s err=%v", post.ID, time.Since(start), err)
 			return
 		}
+		log.Printf("ai tagger done post_id=%s duration=%s", post.ID, time.Since(start))
 
 		tags := parseTaggingResponse(resp.Text())
 		if len(tags) == 0 {

@@ -10,7 +10,8 @@ import (
 )
 
 type blogSettingsPayload struct {
-	CommentsEnabled bool `json:"comments_enabled"`
+	CommentsEnabled bool   `json:"comments_enabled"`
+	DateDisplay     string `json:"date_display"`
 }
 
 func (s *service) handleAdminGetBlogSettings(w http.ResponseWriter, r *http.Request) {
@@ -20,7 +21,11 @@ func (s *service) handleAdminGetBlogSettings(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	if settings == nil {
-		settings = &BlogSettings{CommentsEnabled: true}
+		resolved := resolveBlogSettings(nil)
+		settings = &resolved
+	} else {
+		resolved := resolveBlogSettings(settings)
+		settings = &resolved
 	}
 	writeJSON(w, settings)
 }
@@ -31,7 +36,10 @@ func (s *service) handleAdminUpdateBlogSettings(w http.ResponseWriter, r *http.R
 		http.Error(w, "invalid json", http.StatusBadRequest)
 		return
 	}
-	settings := &BlogSettings{CommentsEnabled: payload.CommentsEnabled}
+	settings := &BlogSettings{
+		CommentsEnabled: payload.CommentsEnabled,
+		DateDisplay:     normalizeDateDisplay(payload.DateDisplay),
+	}
 	if err := s.cfg.Store.UpdateBlogSettings(r.Context(), settings); err != nil {
 		http.Error(w, "failed to update settings", http.StatusInternalServerError)
 		return

@@ -14,7 +14,7 @@
     {{range .Posts}}
       <article class="card">
         <h2><a href="{{$.RoutePrefix}}/{{.Slug}}">{{.Title}}</a></h2>
-        {{if .PublishedAt}}<p style="color:#6b7280;">Published {{.PublishedAt.Format "Jan 2, 2006"}}</p>{{end}}
+        {{if .PublishedAt}}<p style="color:#6b7280;">{{formatPublishedDate .PublishedAt $.DateDisplay}}</p>{{end}}
         {{if .MetaDescription}}<p>{{.MetaDescription}}</p>{{end}}
         {{if .Tags}}
         <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px;">

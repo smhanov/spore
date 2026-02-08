@@ -1,6 +1,8 @@
 package blog
 
 import (
+	"hash/fnv"
+	"math/rand"
 	"net/http"
 	"regexp"
 	"strconv"
@@ -38,10 +40,16 @@ func (s *service) handleListPosts(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	settings := resolveBlogSettings(nil)
+	if rawSettings, err := s.cfg.Store.GetBlogSettings(r.Context()); err == nil {
+		settings = resolveBlogSettings(rawSettings)
+	}
+
 	data := map[string]any{
 		"Posts":       posts,
 		"RoutePrefix": s.routePrefix,
 		"CustomCSS":   s.cfg.CustomCSSURLs,
+		"DateDisplay": settings.DateDisplay,
 	}
 
 	s.executeTemplate(w, "list.html", data)
@@ -68,11 +76,17 @@ func (s *service) handleListPostsByTag(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	settings := resolveBlogSettings(nil)
+	if rawSettings, err := s.cfg.Store.GetBlogSettings(r.Context()); err == nil {
+		settings = resolveBlogSettings(rawSettings)
+	}
+
 	data := map[string]any{
 		"Posts":       posts,
 		"RoutePrefix": s.routePrefix,
 		"CustomCSS":   s.cfg.CustomCSSURLs,
 		"TagSlug":     tagSlug,
+		"DateDisplay": settings.DateDisplay,
 	}
 
 	s.executeTemplate(w, "list.html", data)
@@ -97,9 +111,9 @@ func (s *service) handleViewPost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	commentsEnabled := true
-	if settings, err := s.cfg.Store.GetBlogSettings(r.Context()); err == nil && settings != nil {
-		commentsEnabled = settings.CommentsEnabled
+	settings := resolveBlogSettings(nil)
+	if rawSettings, err := s.cfg.Store.GetBlogSettings(r.Context()); err == nil {
+		settings = resolveBlogSettings(rawSettings)
 	}
 
 	// Load related posts
@@ -115,14 +129,31 @@ func (s *service) handleViewPost(w http.ResponseWriter, r *http.Request) {
 				})
 			}
 		}
+	} else {
+		fallback, err := s.cfg.Store.ListPublishedPosts(r.Context(), 50, 0)
+		if err == nil && len(fallback) > 0 {
+			picks := pickDeterministicPosts(fallback, post.ID, 4, seedForPost(post))
+			if len(picks) > 0 {
+				if err := s.cfg.Store.LoadPostsTags(r.Context(), picks); err == nil {
+					for _, rp := range picks {
+						relatedPosts = append(relatedPosts, RelatedPost{
+							Post:       rp,
+							FirstImage: extractFirstImage(rp.ContentHTML),
+							Excerpt:    trimToLength(markdownToPlainText(rp.ContentMarkdown), 150),
+						})
+					}
+				}
+			}
+		}
 	}
 
 	data := map[string]any{
 		"Post":            post,
 		"RoutePrefix":     s.routePrefix,
 		"CustomCSS":       s.cfg.CustomCSSURLs,
-		"CommentsEnabled": commentsEnabled,
+		"CommentsEnabled": settings.CommentsEnabled,
 		"RelatedPosts":    relatedPosts,
+		"DateDisplay":     settings.DateDisplay,
 	}
 
 	s.executeTemplate(w, "post.html", data)
@@ -135,6 +166,38 @@ func extractFirstImage(html string) string {
 		return matches[1]
 	}
 	return ""
+}
+
+func seedForPost(post *Post) int64 {
+	h := fnv.New64a()
+	_, _ = h.Write([]byte(post.ID))
+	if post.Slug != "" {
+		_, _ = h.Write([]byte(post.Slug))
+	}
+	return int64(h.Sum64())
+}
+
+func pickDeterministicPosts(posts []Post, excludeID string, limit int, seed int64) []Post {
+	if limit <= 0 {
+		return []Post{}
+	}
+	pool := make([]Post, 0, len(posts))
+	for _, p := range posts {
+		if p.ID == excludeID {
+			continue
+		}
+		pool = append(pool, p)
+	}
+	if len(pool) <= limit {
+		return pool
+	}
+
+	rng := rand.New(rand.NewSource(seed))
+	for i := len(pool) - 1; i > 0; i -= 1 {
+		j := rng.Intn(i + 1)
+		pool[i], pool[j] = pool[j], pool[i]
+	}
+	return pool[:limit]
 }
 
 func (s *service) executeTemplate(w http.ResponseWriter, name string, data any) {

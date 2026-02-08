@@ -36,7 +36,7 @@
           <a href="#" @click.prevent="currentView = 'list'; sidebarOpen = false" 
              :class="['flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all duration-200 group', 
              currentView === 'list' ? 'bg-brand-50 text-brand-700 shadow-sm ring-1 ring-brand-100' : 'text-slate-600 hover:bg-white hover:shadow-sm']">
-            <i :class="['ph text-lg', currentView === 'list' ? 'ph-article-ny-times-fill' : 'ph-article-ny-times']"></i>
+            <i class="ph ph-article-ny-times text-lg"></i>
             All Posts
             <span class="ml-auto text-xs font-bold px-2 py-0.5 rounded-full" 
                   :class="currentView === 'list' ? 'bg-brand-100 text-brand-700' : 'bg-slate-100 text-slate-500'">
@@ -47,14 +47,14 @@
           <a href="#" @click.prevent="currentView = 'ai-settings'; sidebarOpen = false" 
              :class="['flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all duration-200 group', 
              currentView === 'ai-settings' ? 'bg-brand-50 text-brand-700 shadow-sm ring-1 ring-brand-100' : 'text-slate-600 hover:bg-white hover:shadow-sm']">
-            <i :class="['ph text-lg', currentView === 'ai-settings' ? 'ph-brain-fill' : 'ph-brain']"></i>
+            <i class="ph ph-brain text-lg"></i>
             AI Settings
           </a>
 
           <a href="#" @click.prevent="currentView = 'comments'; sidebarOpen = false" 
              :class="['flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all duration-200 group', 
              currentView === 'comments' ? 'bg-brand-50 text-brand-700 shadow-sm ring-1 ring-brand-100' : 'text-slate-600 hover:bg-white hover:shadow-sm']">
-            <i :class="['ph text-lg', currentView === 'comments' ? 'ph-chat-circle-dots-fill' : 'ph-chat-circle-dots']"></i>
+            <i class="ph ph-chat-circle-dots text-lg"></i>
             Comments
           </a>
         </nav>
@@ -153,7 +153,13 @@
 
                   <div class="flex-1 min-w-0">
                     <div class="flex items-center gap-2 mb-1">
-                      <h3 class="font-bold text-slate-900 truncate text-lg group-hover:text-brand-600 transition-colors">{{ post.title || '(Untitled)' }}</h3>
+                      <a
+                        href="#"
+                        @click.prevent="editPost(post)"
+                        class="font-bold text-slate-900 truncate text-lg group-hover:text-brand-600 transition-colors"
+                      >
+                        {{ post.title || '(Untitled)' }}
+                      </a>
                     </div>
                     <div class="flex flex-wrap items-center gap-x-4 gap-y-2 text-xs text-slate-500 font-medium">
                       <span class="flex items-center gap-1">
@@ -311,7 +317,7 @@
                       <span class="font-semibold text-slate-700">Notes:</span> {{ aiNotes }}
                     </div>
 
-                    <p class="text-[11px] text-slate-500">Changes apply instantly. Use inline Accept/Undo buttons inside the editor.</p>
+                    <p class="text-[11px] text-slate-500">Changes apply instantly. Use the Diff tab to review AI edits, then return to Markdown to keep editing.</p>
                   </div>
 
                   <div v-else class="text-xs text-slate-500">Configure AI providers in the settings page to enable the assistant.</div>
@@ -477,6 +483,19 @@
               </div>
             </div>
 
+            <div class="bg-white border border-slate-200/60 rounded-2xl p-5 shadow-sm">
+              <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+                <div>
+                  <h3 class="text-lg font-bold text-slate-900">Published date display</h3>
+                  <p class="text-sm text-slate-500 mt-1">Choose how dates appear on public posts.</p>
+                </div>
+                <select v-model="blogSettings.date_display" class="w-full md:w-64 text-sm p-2.5 border border-slate-200 rounded-lg focus:border-brand-500 focus:ring-1 focus:ring-brand-500 outline-none">
+                  <option value="absolute">Exact date (Jan 2, 2006)</option>
+                  <option value="approximate">Approximate (5 years ago)</option>
+                </select>
+              </div>
+            </div>
+
             <div class="bg-white border border-slate-200/60 rounded-2xl p-5 shadow-sm space-y-4">
               <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
                 <div>
@@ -559,7 +578,7 @@ const aiNotes = ref('')
 const aiUseSearch = ref(false)
 const aiHighlightEnabled = ref(true)
 const aiHighlight = ref(null)
-const blogSettings = ref({ comments_enabled: true })
+const blogSettings = ref({ comments_enabled: true, date_display: 'absolute' })
 const blogSettingsLoading = ref(false)
 const blogSettingsSaving = ref(false)
 const moderationComments = ref([])
@@ -686,7 +705,7 @@ async function loadBlogSettings() {
   blogSettingsLoading.value = true
   try {
     const result = await getBlogSettings()
-    blogSettings.value = result || { comments_enabled: true }
+    blogSettings.value = result || { comments_enabled: true, date_display: 'absolute' }
   } catch (err) {
     showToast('Failed to load blog settings: ' + err.message, 'error')
   } finally {
@@ -697,7 +716,10 @@ async function loadBlogSettings() {
 async function saveBlogSettings() {
   blogSettingsSaving.value = true
   try {
-    const result = await updateBlogSettings({ comments_enabled: !!blogSettings.value.comments_enabled })
+    const result = await updateBlogSettings({
+      comments_enabled: !!blogSettings.value.comments_enabled,
+      date_display: blogSettings.value.date_display || 'absolute'
+    })
     blogSettings.value = result || blogSettings.value
     showToast('Blog settings saved')
   } catch (err) {

@@ -1,13 +1,81 @@
 <template>
-  <div class="markdown-editor-container">
-    <textarea ref="textarea"></textarea>
+  <div class="markdown-editor">
+    <div class="markdown-tabs">
+      <button
+        type="button"
+        :class="['markdown-tab', activeTab === 'markdown' ? 'is-active' : '']"
+        @click="activeTab = 'markdown'"
+      >
+        Markdown
+      </button>
+      <button
+        type="button"
+        :class="['markdown-tab', activeTab === 'preview' ? 'is-active' : '']"
+        @click="activeTab = 'preview'"
+      >
+        Preview
+      </button>
+      <button
+        v-if="showDiffTab"
+        type="button"
+        :class="['markdown-tab', activeTab === 'diff' ? 'is-active' : '']"
+        @click="activeTab = 'diff'"
+      >
+        Diff
+      </button>
+    </div>
+
+    <div v-if="activeTab === 'markdown'" class="markdown-toolbar">
+      <button type="button" class="tool" title="Bold" @click="applyBold">
+        <i class="ph ph-text-b"></i>
+      </button>
+      <button type="button" class="tool" title="Italic" @click="applyItalic">
+        <i class="ph ph-text-italic"></i>
+      </button>
+      <button type="button" class="tool" title="Heading" @click="applyHeading">
+        <i class="ph ph-text-h"></i>
+      </button>
+      <span class="tool-divider"></span>
+      <button type="button" class="tool" title="Quote" @click="applyQuote">
+        <i class="ph ph-quotes"></i>
+      </button>
+      <button type="button" class="tool" title="Bulleted List" @click="applyBulletList">
+        <i class="ph ph-list-bullets"></i>
+      </button>
+      <button type="button" class="tool" title="Numbered List" @click="applyNumberedList">
+        <i class="ph ph-list-numbers"></i>
+      </button>
+      <span class="tool-divider"></span>
+      <button type="button" class="tool" title="Link" @click="applyLink">
+        <i class="ph ph-link"></i>
+      </button>
+      <button type="button" class="tool" title="Inline Code" @click="applyInlineCode">
+        <i class="ph ph-code"></i>
+      </button>
+      <button type="button" class="tool" title="Code Block" @click="applyCodeBlock">
+        <i class="ph ph-code-block"></i>
+      </button>
+      <button type="button" class="tool" title="Image" @click="insertImageFromPicker">
+        <i class="ph ph-image"></i>
+      </button>
+    </div>
+
+    <div class="markdown-editor-body">
+      <div v-show="activeTab === 'markdown'" ref="editorContainer" class="monaco-editor-root"></div>
+      <div v-show="activeTab === 'preview'" class="markdown-preview markdown-body" v-html="previewHtml"></div>
+      <div v-show="activeTab === 'diff'" ref="diffContainer" class="monaco-diff-root"></div>
+    </div>
   </div>
 </template>
 
 <script setup>
-import { ref, onMounted, onBeforeUnmount, watch } from 'vue'
-import EasyMDE from 'easymde'
-import 'easymde/dist/easymde.min.css'
+import { ref, onMounted, onBeforeUnmount, watch, computed, nextTick } from 'vue'
+import * as monaco from 'monaco-editor'
+import 'monaco-editor/min/vs/editor/editor.main.css'
+import editorWorker from 'monaco-editor/esm/vs/editor/editor.worker?worker'
+import 'monaco-editor/esm/vs/basic-languages/markdown/markdown.contribution'
+import { marked } from 'marked'
+import DOMPurify from 'dompurify'
 import { uploadImage, isImageUploadEnabled } from '../api'
 
 const props = defineProps({
@@ -17,13 +85,25 @@ const props = defineProps({
 
 const emit = defineEmits(['update:modelValue'])
 
-const textarea = ref(null)
+const editorContainer = ref(null)
+const diffContainer = ref(null)
+const activeTab = ref('markdown')
+const showDiffTab = computed(() => !!(props.diffHighlight && typeof props.diffHighlight.previous === 'string'))
+const previewHtml = computed(() => DOMPurify.sanitize(marked.parse(props.modelValue || '')))
+
 let editor = null
-let imageUploadEnabled = false
-let highlightedLines = []
-let diffWidgets = []
-let baselineLines = null
+let diffEditor = null
+let diffOriginalModel = null
 let isApplying = false
+let imageUploadEnabled = false
+let pasteListener = null
+let pasteEnabled = false
+
+if (!self.MonacoEnvironment) {
+  self.MonacoEnvironment = {
+    getWorker: () => new editorWorker()
+  }
+}
 
 async function handleImageUpload(file) {
   try {
@@ -35,430 +115,359 @@ async function handleImageUpload(file) {
   }
 }
 
+function setEditorValue(value) {
+  if (!editor) return
+  const model = editor.getModel()
+  if (!model || model.getValue() === value) return
+  isApplying = true
+  model.setValue(value)
+  isApplying = false
+}
+
+function insertText(text) {
+  if (!editor) return
+  const selection = editor.getSelection()
+  editor.executeEdits('markdown-toolbar', [{ range: selection, text, forceMoveMarkers: true }])
+  editor.focus()
+}
+
+function wrapSelection(prefix, suffix, placeholder) {
+  if (!editor) return
+  const model = editor.getModel()
+  const selection = editor.getSelection()
+  const selected = model.getValueInRange(selection)
+  const content = selected || placeholder
+  const text = `${prefix}${content}${suffix}`
+  editor.executeEdits('markdown-toolbar', [{ range: selection, text, forceMoveMarkers: true }])
+
+  if (selection.startLineNumber === selection.endLineNumber) {
+    const startColumn = selection.startColumn + prefix.length
+    const endColumn = startColumn + content.length
+    editor.setSelection(new monaco.Range(selection.startLineNumber, startColumn, selection.endLineNumber, endColumn))
+  }
+  editor.focus()
+}
+
+function applyLinePrefix(prefix) {
+  if (!editor) return
+  const model = editor.getModel()
+  const selection = editor.getSelection()
+  const start = selection.startLineNumber
+  const end = selection.endLineNumber
+  const edits = []
+  for (let line = start; line <= end; line += 1) {
+    edits.push({
+      range: new monaco.Range(line, 1, line, 1),
+      text: prefix
+    })
+  }
+  editor.executeEdits('markdown-toolbar', edits)
+  editor.focus()
+}
+
+function applyBold() {
+  wrapSelection('**', '**', 'bold text')
+}
+
+function applyItalic() {
+  wrapSelection('*', '*', 'italic text')
+}
+
+function applyInlineCode() {
+  wrapSelection('`', '`', 'code')
+}
+
+function applyCodeBlock() {
+  wrapSelection('```\n', '\n```', 'code block')
+}
+
+function applyHeading() {
+  applyLinePrefix('# ')
+}
+
+function applyQuote() {
+  applyLinePrefix('> ')
+}
+
+function applyBulletList() {
+  applyLinePrefix('- ')
+}
+
+function applyNumberedList() {
+  applyLinePrefix('1. ')
+}
+
+function applyLink() {
+  wrapSelection('[', '](https://)', 'link text')
+}
+
+async function insertImageFromPicker() {
+  if (!imageUploadEnabled) {
+    insertText('![](https://)')
+    return
+  }
+  const input = document.createElement('input')
+  input.type = 'file'
+  input.accept = 'image/*'
+  input.onchange = async () => {
+    const file = input.files[0]
+    if (!file) return
+    const url = await handleImageUpload(file)
+    if (url) {
+      insertText(`![${file.name}](${url})`)
+    }
+  }
+  input.click()
+}
+
+async function handlePaste(event) {
+  if (!imageUploadEnabled || !event.clipboardData) return
+  const files = []
+  for (const item of event.clipboardData.items) {
+    if (item.type && item.type.startsWith('image/')) {
+      const file = item.getAsFile()
+      if (file) files.push(file)
+    }
+  }
+  if (files.length === 0) return
+  event.preventDefault()
+
+  for (const file of files) {
+    const url = await handleImageUpload(file)
+    if (url) {
+      insertText(`![${file.name}](${url})\n`)
+    }
+  }
+}
+
+function setPasteListener(enabled) {
+  if (enabled === pasteEnabled) return
+  pasteEnabled = enabled
+  if (enabled) {
+    pasteListener = (event) => handlePaste(event)
+    window.addEventListener('paste', pasteListener, true)
+  } else if (pasteListener) {
+    window.removeEventListener('paste', pasteListener, true)
+    pasteListener = null
+  }
+}
+
+function updateDiffModels(payload) {
+  if (!diffEditor || !editor) return
+  if (!payload || typeof payload.previous !== 'string') return
+
+  if (!diffOriginalModel) {
+    diffOriginalModel = monaco.editor.createModel(payload.previous, 'markdown')
+  } else {
+    diffOriginalModel.setValue(payload.previous)
+  }
+
+  diffEditor.setModel({
+    original: diffOriginalModel,
+    modified: editor.getModel()
+  })
+}
+
 onMounted(async () => {
-  // Check if image upload is enabled
   try {
     imageUploadEnabled = await isImageUploadEnabled()
   } catch {
     imageUploadEnabled = false
   }
 
-  const toolbar = [
-    'bold', 'italic', 'heading', '|',
-    'quote', 'unordered-list', 'ordered-list', '|',
-    'link',
-    ...(imageUploadEnabled ? ['image', {
-      name: 'upload-image',
-      action: async (editor) => {
-        const input = document.createElement('input')
-        input.type = 'file'
-        input.accept = 'image/*'
-        input.onchange = async () => {
-          const file = input.files[0]
-          if (!file) return
-          
-          const url = await handleImageUpload(file)
-          if (url) {
-            const cm = editor.codemirror
-            const pos = cm.getCursor()
-            cm.replaceRange(`![${file.name}](${url})`, pos)
-          }
-        }
-        input.click()
-      },
-      className: 'fa fa-upload',
-      title: 'Upload Image',
-    }] : ['image']),
-    '|',
-    'preview', 'side-by-side', 'fullscreen', '|',
-    'guide'
-  ]
+  const model = monaco.editor.createModel(props.modelValue || '', 'markdown')
 
-  editor = new EasyMDE({
-    element: textarea.value,
-    initialValue: props.modelValue,
-    spellChecker: false,
-    autofocus: false,
-    placeholder: 'Write your content using Markdown... (paste or drag images here)',
-    toolbar,
-    uploadImage: imageUploadEnabled,
-    imageUploadFunction: imageUploadEnabled ? async (file, onSuccess, onError) => {
-      try {
-        const result = await uploadImage(file)
-        onSuccess(result.url)
-      } catch (err) {
-        onError(err.message)
-      }
-    } : undefined,
-    imageAccept: 'image/png, image/jpeg, image/gif, image/webp',
-    status: ['lines', 'words', 'cursor'],
-    renderingConfig: {
-      singleLineBreaks: false,
-      codeSyntaxHighlighting: true,
-    },
+  editor = monaco.editor.create(editorContainer.value, {
+    model,
+    language: 'markdown',
+    wordWrap: 'on',
+    lineNumbers: 'on',
+    minimap: { enabled: false },
+    scrollBeyondLastLine: false,
+    fontSize: 14,
+    fontFamily: 'Menlo, Monaco, "Courier New", monospace',
+    padding: { top: 12, bottom: 12 },
+    automaticLayout: true
   })
 
-  editor.codemirror.on('change', () => {
+  editor.onDidChangeModelContent(() => {
     if (!isApplying) {
-      if (highlightedLines.length > 0) {
-        clearHighlights()
-      }
-      if (diffWidgets.length > 0) {
-        clearWidgets()
-      }
-      baselineLines = null
+      emit('update:modelValue', editor.getValue())
     }
-    emit('update:modelValue', editor.value())
   })
+
+  editor.onDidFocusEditorText(() => {
+    if (activeTab.value === 'markdown') {
+      setPasteListener(true)
+    }
+  })
+
+  editor.onDidBlurEditorText(() => {
+    setPasteListener(false)
+  })
+
+  diffEditor = monaco.editor.createDiffEditor(diffContainer.value, {
+    readOnly: true,
+    renderSideBySide: true,
+    minimap: { enabled: false },
+    scrollBeyondLastLine: false,
+    wordWrap: 'on',
+    automaticLayout: true
+  })
+
+  updateDiffModels(props.diffHighlight)
 })
 
 watch(() => props.modelValue, (newVal) => {
-  if (editor && editor.value() !== newVal) {
-    editor.value(newVal)
-  }
+  setEditorValue(newVal || '')
 })
 
 watch(() => props.diffHighlight, (payload) => {
-  if (!editor) return
-  if (!payload || typeof payload.previous !== 'string' || typeof payload.current !== 'string') {
-    clearHighlights()
-    clearWidgets()
-    baselineLines = null
+  if (!payload || typeof payload.previous !== 'string') {
+    if (activeTab.value === 'diff') {
+      activeTab.value = 'markdown'
+    }
     return
   }
-  applyHighlights(payload.previous, payload.current)
+  updateDiffModels(payload)
 }, { deep: true })
 
-onBeforeUnmount(() => {
-  if (editor) {
-    editor.toTextArea()
-    editor = null
+watch(showDiffTab, (enabled) => {
+  if (!enabled && activeTab.value === 'diff') {
+    activeTab.value = 'markdown'
   }
 })
 
-function clearHighlights() {
-  if (!editor || highlightedLines.length === 0) return
-  const cm = editor.codemirror
-  highlightedLines.forEach((line) => {
-    cm.removeLineClass(line, 'background', 'ai-diff-add')
-  })
-  highlightedLines = []
-}
-
-function clearWidgets() {
-  if (diffWidgets.length === 0) return
-  diffWidgets.forEach((widget) => widget.clear())
-  diffWidgets = []
-}
-
-function applyHighlights(previous, current) {
-  if (!editor) return
-  clearHighlights()
-  clearWidgets()
-  baselineLines = previous.split('\n')
-  renderInlineDiff(current)
-}
-
-function renderInlineDiff(current) {
-  if (!editor || !baselineLines) return
-  clearHighlights()
-  clearWidgets()
-
-  const currentLines = current.split('\n')
-  const diff = computeLineDiff(baselineLines, currentLines)
-  const cm = editor.codemirror
-
-  diff.added.forEach((change) => {
-    const line = Math.min(change.index, Math.max(cm.lineCount() - 1, 0))
-    cm.addLineClass(line, 'background', 'ai-diff-add')
-    const widget = cm.addLineWidget(line, createChangeWidget(change, 'added'), { above: false })
-    diffWidgets.push(widget)
-  })
-  highlightedLines = diff.added.map((change) => Math.min(change.index, Math.max(cm.lineCount() - 1, 0)))
-
-  diff.removed.forEach((change) => {
-    const line = Math.min(change.index, Math.max(cm.lineCount() - 1, 0))
-    const widget = cm.addLineWidget(line, createChangeWidget(change, 'removed'), { above: true })
-    diffWidgets.push(widget)
-  })
-}
-
-function computeLineDiff(oldLines, newLines) {
-  const rows = oldLines.length
-  const cols = newLines.length
-  const dp = Array.from({ length: rows + 1 }, () => Array(cols + 1).fill(0))
-
-  for (let i = rows - 1; i >= 0; i -= 1) {
-    for (let j = cols - 1; j >= 0; j -= 1) {
-      if (oldLines[i] === newLines[j]) {
-        dp[i][j] = dp[i + 1][j + 1] + 1
-      } else {
-        dp[i][j] = Math.max(dp[i + 1][j], dp[i][j + 1])
-      }
-    }
+watch(activeTab, async () => {
+  await nextTick()
+  if (activeTab.value === 'markdown' && editor) {
+    editor.layout()
+    editor.focus()
+    setPasteListener(true)
   }
-
-  const added = []
-  const removed = []
-  let i = 0
-  let j = 0
-  while (i < rows && j < cols) {
-    if (oldLines[i] === newLines[j]) {
-      i += 1
-      j += 1
-    } else if (dp[i + 1][j] >= dp[i][j + 1]) {
-      removed.push({ type: 'remove', index: j, text: oldLines[i] })
-      i += 1
-    } else {
-      added.push({ type: 'add', index: j, text: newLines[j] })
-      j += 1
-    }
+  if (activeTab.value === 'diff' && diffEditor) {
+    diffEditor.layout()
   }
-  while (i < rows) {
-    removed.push({ type: 'remove', index: j, text: oldLines[i] })
-    i += 1
+  if (activeTab.value !== 'markdown') {
+    setPasteListener(false)
   }
-  while (j < cols) {
-    added.push({ type: 'add', index: j, text: newLines[j] })
-    j += 1
+})
+
+onBeforeUnmount(() => {
+  if (editor) {
+    setPasteListener(false)
+    editor.dispose()
+    editor = null
   }
-
-  return { added, removed }
-}
-
-function createChangeWidget(change, kind) {
-  const node = document.createElement('div')
-  node.className = `ai-diff-widget ai-diff-${kind}`
-
-  const text = document.createElement('div')
-  text.className = 'ai-diff-widget__text'
-  text.textContent = kind === 'removed' ? `- ${change.text}` : `+ ${change.text}`
-
-  const actions = document.createElement('div')
-  actions.className = 'ai-diff-widget__actions'
-
-  const acceptBtn = document.createElement('button')
-  acceptBtn.type = 'button'
-  acceptBtn.className = 'ai-diff-btn'
-  acceptBtn.textContent = 'Accept'
-  acceptBtn.onclick = (event) => {
-    event.preventDefault()
-    acceptChange(change)
+  if (diffEditor) {
+    diffEditor.dispose()
+    diffEditor = null
   }
-
-  const undoBtn = document.createElement('button')
-  undoBtn.type = 'button'
-  undoBtn.className = 'ai-diff-btn ai-diff-btn--muted'
-  undoBtn.textContent = 'Undo'
-  undoBtn.onclick = (event) => {
-    event.preventDefault()
-    undoChange(change)
+  if (diffOriginalModel) {
+    diffOriginalModel.dispose()
+    diffOriginalModel = null
   }
-
-  actions.appendChild(acceptBtn)
-  actions.appendChild(undoBtn)
-  node.appendChild(text)
-  node.appendChild(actions)
-
-  return node
-}
-
-function acceptChange(change) {
-  if (!baselineLines || !editor) return
-  if (change.type === 'add') {
-    baselineLines.splice(change.index, 0, change.text)
-  } else {
-    if (baselineLines[change.index] === change.text) {
-      baselineLines.splice(change.index, 1)
-    } else {
-      const idx = baselineLines.indexOf(change.text)
-      if (idx > -1) {
-        baselineLines.splice(idx, 1)
-      }
-    }
-  }
-  renderInlineDiff(editor.value())
-}
-
-function undoChange(change) {
-  if (!editor || !baselineLines) return
-  const currentLines = editor.value().split('\n')
-
-  if (change.type === 'add') {
-    if (currentLines[change.index] === change.text) {
-      currentLines.splice(change.index, 1)
-    } else {
-      const idx = currentLines.indexOf(change.text)
-      if (idx > -1) {
-        currentLines.splice(idx, 1)
-      }
-    }
-  } else {
-    currentLines.splice(change.index, 0, change.text)
-  }
-
-  setEditorValue(currentLines.join('\n'))
-  renderInlineDiff(editor.value())
-}
-
-function setEditorValue(value) {
-  if (!editor) return
-  isApplying = true
-  editor.value(value)
-  isApplying = false
-}
+})
 </script>
 
 <style>
-.markdown-editor-container {
-  width: 100%;
-  height: 100%;
+.markdown-editor {
   display: flex;
   flex-direction: column;
-}
-
-.markdown-editor-container .EasyMDEContainer {
-  width: 100%;
   height: 100%;
-  display: flex;
-  flex-direction: column;
+  width: 100%;
 }
 
-.markdown-editor-container .CodeMirror {
-  flex: 1;
-  min-height: 300px;
-  border: none;
-  border-radius: 0;
-  font-family: 'Menlo', 'Monaco', 'Courier New', monospace;
-  font-size: 14px;
-  line-height: 1.6;
-  color: #334155;
+.markdown-tabs {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border-bottom: 1px solid #e2e8f0;
+  padding: 10px 12px;
+  background: #f8fafc;
+}
+
+.markdown-tab {
+  border: 1px solid transparent;
+  padding: 6px 12px;
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #64748b;
+  background: transparent;
+  border-radius: 999px;
+  transition: all 0.2s ease;
+}
+
+.markdown-tab:hover {
+  color: #0f172a;
+  background: #e2e8f0;
+}
+
+.markdown-tab.is-active {
+  color: #0f172a;
+  background: #fff;
+  border-color: #e2e8f0;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.08);
+}
+
+.markdown-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+  border-bottom: 1px solid #e2e8f0;
   background: #fff;
 }
 
-.markdown-editor-container .CodeMirror-scroll {
-  min-height: 300px;
-}
-
-.markdown-editor-container .editor-toolbar {
-  border: none;
-  border-bottom: 1px solid #e2e8f0;
-  border-radius: 0;
+.markdown-toolbar .tool {
+  width: 34px;
+  height: 34px;
+  border-radius: 8px;
+  border: 1px solid transparent;
+  color: #475569;
   background: #f8fafc;
-  padding: 8px 12px;
+  transition: all 0.2s ease;
 }
 
-.markdown-editor-container .editor-toolbar button {
-  color: #64748b !important;
-  border: none !important;
-  border-radius: 6px !important;
-  width: 32px;
-  height: 32px;
+.markdown-toolbar .tool:hover {
+  color: #0f172a;
+  background: #e2e8f0;
 }
 
-.markdown-editor-container .editor-toolbar button:hover {
-  background: #e2e8f0 !important;
-  color: #1e293b !important;
+.markdown-toolbar .tool-divider {
+  width: 1px;
+  height: 18px;
+  background: #e2e8f0;
+  margin: 0 4px;
 }
 
-.markdown-editor-container .editor-toolbar button.active {
-  background: #3b82f6 !important;
-  color: white !important;
-}
-
-.markdown-editor-container .editor-toolbar i.separator {
-  border-left-color: #e2e8f0;
-}
-
-.markdown-editor-container .editor-preview {
-  background: #f8fafc;
-  padding: 16px;
-}
-
-.markdown-editor-container .editor-preview-side {
-  border-left: 1px solid #e2e8f0;
-  background: #f8fafc;
-}
-
-.markdown-editor-container .editor-statusbar {
-  border-top: 1px solid #e2e8f0;
-  padding: 8px 12px;
-  color: #94a3b8;
-  font-size: 12px;
-}
-
-/* Fix for fullscreen and side-by-side mode */
-.markdown-editor-container .EasyMDEContainer.fullscreen,
-.markdown-editor-container .EasyMDEContainer.sidesided {
-  z-index: 9999;
-  position: fixed !important;
-  top: 0 !important;
-  left: 0 !important;
-  right: 0 !important;
-  bottom: 0 !important;
-  width: 100% !important;
-  height: 100% !important;
-}
-
-/* Drag and drop indicator */
-.markdown-editor-container .CodeMirror-dragover {
-  background: #eff6ff;
-  border: 2px dashed #3b82f6;
-}
-
-.markdown-editor-container .CodeMirror .ai-diff-add {
-  background: #ecfdf3;
-}
-
-.markdown-editor-container .ai-diff-widget {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  padding: 4px 8px;
-  font-size: 12px;
-  line-height: 1.4;
-  font-family: 'Menlo', 'Monaco', 'Courier New', monospace;
-  border-left: 2px solid transparent;
-  border-radius: 6px;
-  margin: 2px 0;
-}
-
-.markdown-editor-container .ai-diff-widget__text {
+.markdown-editor-body {
   flex: 1;
-  white-space: pre-wrap;
+  min-height: 0;
+  position: relative;
 }
 
-.markdown-editor-container .ai-diff-widget__actions {
-  display: flex;
-  gap: 6px;
+.monaco-editor-root,
+.monaco-diff-root {
+  height: 100%;
+  width: 100%;
 }
 
-.markdown-editor-container .ai-diff-btn {
-  border: 1px solid #cbd5f5;
-  background: #f8fafc;
-  color: #1f2937;
-  font-size: 11px;
-  padding: 2px 6px;
-  border-radius: 6px;
-  cursor: pointer;
+.markdown-preview {
+  height: 100%;
+  overflow-y: auto;
+  padding: 20px 24px;
+  background: #fff;
 }
 
-.markdown-editor-container .ai-diff-btn--muted {
-  border-color: #e2e8f0;
-  color: #6b7280;
+.monaco-editor .margin,
+.monaco-editor .monaco-editor-background {
+  background-color: #fff;
 }
 
-.markdown-editor-container .ai-diff-added {
-  background: #ecfdf3;
-  border-left-color: #10b981;
-  color: #065f46;
-}
-
-.markdown-editor-container .ai-diff-removed {
-  background: #fef2f2;
-  border-left-color: #ef4444;
-  color: #991b1b;
-  text-decoration: line-through;
+.monaco-editor .line-numbers {
+  color: #cbd5e1;
 }
 </style>

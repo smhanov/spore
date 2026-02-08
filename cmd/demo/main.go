@@ -219,7 +219,7 @@ func (m *memoryStore) GetBlogSettings(ctx context.Context) (*blog.BlogSettings, 
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	if m.settings == nil {
-		return &blog.BlogSettings{CommentsEnabled: true}, nil
+		return &blog.BlogSettings{CommentsEnabled: true, DateDisplay: "absolute"}, nil
 	}
 	copy := *m.settings
 	return &copy, nil
