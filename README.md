@@ -33,7 +33,18 @@ go get github.com/smhanov/spore
 
 ## Quick Start
 
-### 1. Seed the database (Optional)
+### 1. Build the admin frontend
+
+The admin UI is a Vue app that must be compiled before the Go code can embed it:
+
+```bash
+cd frontend
+npm install
+npm run build
+cd ..
+```
+
+### 2. Seed the database (Optional)
 
 This project includes a seed script that creates a SQLite database `blog.db` populated with sample content:
 
@@ -41,7 +52,7 @@ This project includes a seed script that creates a SQLite database `blog.db` pop
 go run ./cmd/seed/main.go
 ```
 
-### 2. Run the demo
+### 3. Run the demo
 
 The demo server will automatically use `blog.db` if it exists. Otherwise, it defaults to a transient in-memory store:
 
