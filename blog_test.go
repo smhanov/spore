@@ -11,6 +11,7 @@ import (
 )
 
 type mockStore struct {
+	migrateFn func(ctx context.Context) error
 	listFn    func(ctx context.Context, limit, offset int) ([]Post, error)
 	listAllFn func(ctx context.Context, limit, offset int) ([]Post, error)
 	getPubFn  func(ctx context.Context, slug string) (*Post, error)
@@ -19,6 +20,15 @@ type mockStore struct {
 	updateFn  func(ctx context.Context, p *Post) error
 	getByIDFn func(ctx context.Context, id string) (*Post, error)
 	deleteFn  func(ctx context.Context, id string) error
+	getAIFn   func(ctx context.Context) (*AISettings, error)
+	updateAIFn func(ctx context.Context, settings *AISettings) error
+}
+
+func (m *mockStore) Migrate(ctx context.Context) error {
+	if m.migrateFn != nil {
+		return m.migrateFn(ctx)
+	}
+	return nil
 }
 
 func (m *mockStore) GetPublishedPostBySlug(ctx context.Context, slug string) (*Post, error) {
@@ -76,6 +86,20 @@ func (m *mockStore) ListAllPosts(ctx context.Context, limit, offset int) ([]Post
 	}
 	// Default to ListPublishedPosts behavior for backwards compatibility
 	return m.ListPublishedPosts(ctx, limit, offset)
+}
+
+func (m *mockStore) GetAISettings(ctx context.Context) (*AISettings, error) {
+	if m.getAIFn != nil {
+		return m.getAIFn(ctx)
+	}
+	return nil, nil
+}
+
+func (m *mockStore) UpdateAISettings(ctx context.Context, settings *AISettings) error {
+	if m.updateAIFn != nil {
+		return m.updateAIFn(ctx, settings)
+	}
+	return nil
 }
 
 func TestNewHandlerRequiresStore(t *testing.T) {
@@ -227,7 +251,7 @@ func TestAdminSPAFallbackServesIndex(t *testing.T) {
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status = %d", rr.Code)
 	}
-	if !strings.Contains(rr.Body.String(), "GoBlog Admin") {
+	if !strings.Contains(rr.Body.String(), "Blog Admin") {
 		t.Fatalf("expected admin placeholder content")
 	}
 }

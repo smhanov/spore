@@ -43,6 +43,13 @@
               {{ posts.length }}
             </span>
           </a>
+
+          <a href="#" @click.prevent="currentView = 'ai-settings'; sidebarOpen = false" 
+             :class="['flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all duration-200 group', 
+             currentView === 'ai-settings' ? 'bg-brand-50 text-brand-700 shadow-sm ring-1 ring-brand-100' : 'text-slate-600 hover:bg-white hover:shadow-sm']">
+            <i :class="['ph text-lg', currentView === 'ai-settings' ? 'ph-brain-fill' : 'ph-brain']"></i>
+            AI Settings
+          </a>
         </nav>
 
         <div class="p-4 border-t border-slate-200/60">
@@ -170,7 +177,7 @@
         </div>
 
         <!-- VIEW: POST EDITOR -->
-        <div v-else class="h-full flex flex-col bg-white">
+        <div v-else-if="currentView === 'editor'" class="h-full flex flex-col bg-white">
           
           <!-- Editor Toolbar -->
           <div class="h-16 border-b border-slate-200 flex items-center justify-between px-4 md:px-6 bg-white z-10">
@@ -231,7 +238,7 @@
               <div class="flex-1 flex overflow-hidden">
                 <!-- Markdown Editor with EasyMDE -->
                 <div class="flex-1 flex flex-col h-full relative">
-                  <MarkdownEditor v-model="draftPost.content" />
+                  <MarkdownEditor v-model="draftPost.content" :diffHighlight="aiHighlight" />
                 </div>
               </div>
             </div>
@@ -263,9 +270,173 @@
                     </span>
                   </div>
                 </div>
+
+                <!-- AI Assistant -->
+                <div class="space-y-3 border-t border-slate-100 pt-4">
+                  <div class="flex items-center justify-between">
+                    <label class="text-xs font-semibold text-slate-500 uppercase">AI Assistant</label>
+                    <span v-if="aiEnabled.smart || aiEnabled.dumb" class="text-[11px] text-emerald-600 font-semibold">Ready</span>
+                    <span v-else class="text-[11px] text-slate-400 font-semibold">Not configured</span>
+                  </div>
+
+                  <div v-if="aiEnabled.smart || aiEnabled.dumb" class="space-y-3">
+                    <div class="flex items-center gap-2">
+                      <button @click="aiMode = 'smart'" :class="['px-2 py-1 rounded-md text-xs font-semibold border', aiMode === 'smart' ? 'bg-brand-50 text-brand-700 border-brand-100' : 'border-slate-200 text-slate-500']">Smart</button>
+                      <button @click="aiMode = 'dumb'" :disabled="!aiEnabled.dumb" :class="['px-2 py-1 rounded-md text-xs font-semibold border', aiMode === 'dumb' ? 'bg-brand-50 text-brand-700 border-brand-100' : 'border-slate-200 text-slate-500', !aiEnabled.dumb ? 'opacity-50 cursor-not-allowed' : '']">Dumb</button>
+                    </div>
+
+                    <label class="flex items-center gap-2 text-[11px] text-slate-500">
+                      <input v-model="aiUseSearch" type="checkbox" class="accent-brand-600">
+                      Use web search if supported
+                    </label>
+
+                    <label class="flex items-center gap-2 text-[11px] text-slate-500">
+                      <input v-model="aiHighlightEnabled" type="checkbox" class="accent-brand-600">
+                      Highlight applied changes in editor
+                    </label>
+
+                    <textarea v-model="aiQuery" rows="3" placeholder="Ask for edits, rewrites, or tone changes..." class="w-full text-xs p-2 border border-slate-200 rounded-lg focus:border-brand-500 focus:ring-1 focus:ring-brand-500 outline-none resize-none"></textarea>
+                    <button @click="sendAI" :disabled="aiBusy || !aiQuery" :class="['w-full text-xs font-semibold px-3 py-2 rounded-lg text-white transition-all', aiBusy ? 'bg-slate-400 cursor-not-allowed' : 'bg-slate-900 hover:bg-slate-800']">
+                      {{ aiBusy ? 'Thinking...' : 'Send to AI' }}
+                    </button>
+
+                    <div v-if="aiNotes" class="text-xs text-slate-600 bg-slate-50 border border-slate-100 rounded-lg p-2">
+                      <span class="font-semibold text-slate-700">Notes:</span> {{ aiNotes }}
+                    </div>
+
+                    <p class="text-[11px] text-slate-500">Changes apply instantly. Use inline Accept/Undo buttons inside the editor.</p>
+                  </div>
+
+                  <div v-else class="text-xs text-slate-500">Configure AI providers in the settings page to enable the assistant.</div>
+                </div>
               </div>
             </div>
 
+          </div>
+        </div>
+
+        <!-- VIEW: AI SETTINGS -->
+        <div v-else-if="currentView === 'ai-settings'" class="h-full flex flex-col overflow-y-auto">
+          <div class="p-4 md:p-8 pb-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div>
+              <h2 class="text-2xl font-bold text-slate-900">AI Settings</h2>
+              <p class="text-slate-500 text-sm mt-1">Configure smart and dumb models for the editor assistant</p>
+            </div>
+            <button @click="saveAISettings" :disabled="aiSaving" 
+              :class="['text-white px-5 py-2.5 rounded-xl text-sm font-medium shadow-lg transition-all active:scale-95 flex items-center gap-2', aiSaving ? 'bg-slate-500 cursor-not-allowed' : 'bg-slate-900 hover:bg-slate-800']">
+              <i v-if="aiSaving" class="ph ph-spinner animate-spin"></i>
+              {{ aiSaving ? 'Saving...' : 'Save Settings' }}
+            </button>
+          </div>
+
+          <div class="px-4 md:px-8 pb-8 space-y-6">
+            <div v-if="aiLoading" class="flex items-center gap-2 text-slate-500">
+              <i class="ph ph-spinner animate-spin"></i>
+              Loading settings...
+            </div>
+
+            <div v-else class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              <div class="bg-white border border-slate-200/60 rounded-2xl p-5 shadow-sm space-y-4">
+                <div class="flex items-center justify-between">
+                  <h3 class="text-lg font-bold text-slate-900">Smart AI</h3>
+                  <span :class="['text-xs font-semibold px-2 py-1 rounded-full', aiEnabled.smart ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-500']">
+                    {{ aiEnabled.smart ? 'Enabled' : 'Disabled' }}
+                  </span>
+                </div>
+
+                <div class="space-y-2">
+                  <label class="text-xs font-semibold text-slate-500 uppercase">Provider</label>
+                  <select v-model="aiSettings.smart.provider" class="w-full text-sm p-2.5 border border-slate-200 rounded-lg focus:border-brand-500 focus:ring-1 focus:ring-brand-500 outline-none">
+                    <option value="">Select provider</option>
+                    <option value="openai">OpenAI</option>
+                    <option value="anthropic">Anthropic</option>
+                    <option value="gemini">Gemini</option>
+                    <option value="ollama">Ollama</option>
+                  </select>
+                </div>
+
+                <div class="space-y-2">
+                  <label class="text-xs font-semibold text-slate-500 uppercase">Model</label>
+                  <input v-model="aiSettings.smart.model" type="text" placeholder="gpt-4o-mini" class="w-full text-sm p-2.5 border border-slate-200 rounded-lg focus:border-brand-500 focus:ring-1 focus:ring-brand-500 outline-none">
+                </div>
+
+                <div class="space-y-2">
+                  <label class="text-xs font-semibold text-slate-500 uppercase">API Key</label>
+                  <input v-model="aiSettings.smart.api_key" type="password" placeholder="sk-..." class="w-full text-sm p-2.5 border border-slate-200 rounded-lg focus:border-brand-500 focus:ring-1 focus:ring-brand-500 outline-none">
+                </div>
+
+                <div class="space-y-2">
+                  <label class="text-xs font-semibold text-slate-500 uppercase">Base URL</label>
+                  <input v-model="aiSettings.smart.base_url" type="text" placeholder="https://api.openai.com" class="w-full text-sm p-2.5 border border-slate-200 rounded-lg focus:border-brand-500 focus:ring-1 focus:ring-brand-500 outline-none">
+                </div>
+
+                <div class="grid grid-cols-2 gap-3">
+                  <div class="space-y-2">
+                    <label class="text-xs font-semibold text-slate-500 uppercase">Temperature</label>
+                    <input v-model.number="aiSettings.smart.temperature" type="number" step="0.1" min="0" max="2" placeholder="0.4" class="w-full text-sm p-2.5 border border-slate-200 rounded-lg focus:border-brand-500 focus:ring-1 focus:ring-brand-500 outline-none">
+                  </div>
+                  <div class="space-y-2">
+                    <label class="text-xs font-semibold text-slate-500 uppercase">Max Tokens</label>
+                    <input v-model.number="aiSettings.smart.max_tokens" type="number" min="1" placeholder="800" class="w-full text-sm p-2.5 border border-slate-200 rounded-lg focus:border-brand-500 focus:ring-1 focus:ring-brand-500 outline-none">
+                  </div>
+                </div>
+              </div>
+
+              <div class="bg-white border border-slate-200/60 rounded-2xl p-5 shadow-sm space-y-4">
+                <div class="flex items-center justify-between">
+                  <h3 class="text-lg font-bold text-slate-900">Dumb AI</h3>
+                  <span :class="['text-xs font-semibold px-2 py-1 rounded-full', aiEnabled.dumb ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-500']">
+                    {{ aiEnabled.dumb ? 'Enabled' : 'Disabled' }}
+                  </span>
+                </div>
+
+                <div class="flex items-center justify-between gap-3">
+                  <p class="text-xs text-slate-500">Use for quick rewrites or simple edits.</p>
+                  <button @click="copySmartToDumb" class="text-xs font-semibold text-brand-600 hover:text-brand-700">Copy smart → dumb</button>
+                </div>
+
+                <div class="space-y-2">
+                  <label class="text-xs font-semibold text-slate-500 uppercase">Provider</label>
+                  <select v-model="aiSettings.dumb.provider" class="w-full text-sm p-2.5 border border-slate-200 rounded-lg focus:border-brand-500 focus:ring-1 focus:ring-brand-500 outline-none">
+                    <option value="">Select provider</option>
+                    <option value="openai">OpenAI</option>
+                    <option value="anthropic">Anthropic</option>
+                    <option value="gemini">Gemini</option>
+                    <option value="ollama">Ollama</option>
+                  </select>
+                </div>
+
+                <div class="space-y-2">
+                  <label class="text-xs font-semibold text-slate-500 uppercase">Model</label>
+                  <input v-model="aiSettings.dumb.model" type="text" placeholder="gpt-4o-mini" class="w-full text-sm p-2.5 border border-slate-200 rounded-lg focus:border-brand-500 focus:ring-1 focus:ring-brand-500 outline-none">
+                </div>
+
+                <div class="space-y-2">
+                  <label class="text-xs font-semibold text-slate-500 uppercase">API Key</label>
+                  <input v-model="aiSettings.dumb.api_key" type="password" placeholder="sk-..." class="w-full text-sm p-2.5 border border-slate-200 rounded-lg focus:border-brand-500 focus:ring-1 focus:ring-brand-500 outline-none">
+                </div>
+
+                <div class="space-y-2">
+                  <label class="text-xs font-semibold text-slate-500 uppercase">Base URL</label>
+                  <input v-model="aiSettings.dumb.base_url" type="text" placeholder="https://api.openai.com" class="w-full text-sm p-2.5 border border-slate-200 rounded-lg focus:border-brand-500 focus:ring-1 focus:ring-brand-500 outline-none">
+                </div>
+
+                <div class="grid grid-cols-2 gap-3">
+                  <div class="space-y-2">
+                    <label class="text-xs font-semibold text-slate-500 uppercase">Temperature</label>
+                    <input v-model.number="aiSettings.dumb.temperature" type="number" step="0.1" min="0" max="2" placeholder="0.2" class="w-full text-sm p-2.5 border border-slate-200 rounded-lg focus:border-brand-500 focus:ring-1 focus:ring-brand-500 outline-none">
+                  </div>
+                  <div class="space-y-2">
+                    <label class="text-xs font-semibold text-slate-500 uppercase">Max Tokens</label>
+                    <input v-model.number="aiSettings.dumb.max_tokens" type="number" min="1" placeholder="400" class="w-full text-sm p-2.5 border border-slate-200 rounded-lg focus:border-brand-500 focus:ring-1 focus:ring-brand-500 outline-none">
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="bg-white border border-slate-200/60 rounded-2xl p-5 shadow-sm text-sm text-slate-600">
+              <p>Tip: If provider, model, or required API key is missing, the assistant is disabled. Ollama typically runs without an API key.</p>
+            </div>
           </div>
         </div>
 
@@ -278,7 +449,7 @@
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
-import { listPosts, createPost, updatePost, deletePost } from './api'
+import { listPosts, createPost, updatePost, deletePost, getAISettings, updateAISettings, sendAIChat } from './api'
 import MarkdownEditor from './components/MarkdownEditor.vue'
 
 // --- State ---
@@ -291,6 +462,17 @@ const loading = ref(false)
 const saving = ref(false)
 const posts = ref([])
 const originalPostJson = ref('')
+const aiSettings = ref(defaultAISettings())
+const aiEnabled = ref({ smart: false, dumb: false })
+const aiLoading = ref(false)
+const aiSaving = ref(false)
+const aiMode = ref('smart')
+const aiQuery = ref('')
+const aiBusy = ref(false)
+const aiNotes = ref('')
+const aiUseSearch = ref(false)
+const aiHighlightEnabled = ref(true)
+const aiHighlight = ref(null)
 
 // Toast state
 const toast = ref({
@@ -361,6 +543,92 @@ async function loadPosts() {
   }
 }
 
+async function loadAISettings() {
+  aiLoading.value = true
+  try {
+    const result = await getAISettings()
+    aiSettings.value = result?.settings ? normalizeAISettings(result.settings) : defaultAISettings()
+    aiEnabled.value = {
+      smart: !!result?.smart_enabled,
+      dumb: !!result?.dumb_enabled
+    }
+    if (!aiEnabled.value.dumb && aiMode.value === 'dumb') {
+      aiMode.value = 'smart'
+    }
+  } catch (err) {
+    showToast('Failed to load AI settings: ' + err.message, 'error')
+  } finally {
+    aiLoading.value = false
+  }
+}
+
+async function saveAISettings() {
+  aiSaving.value = true
+  try {
+    const payload = normalizeAISettings(aiSettings.value)
+    const result = await updateAISettings(payload)
+    aiSettings.value = normalizeAISettings(result?.settings || payload)
+    aiEnabled.value = {
+      smart: !!result?.smart_enabled,
+      dumb: !!result?.dumb_enabled
+    }
+    if (!aiEnabled.value.dumb && aiMode.value === 'dumb') {
+      aiMode.value = 'smart'
+    }
+    showToast('AI settings saved')
+  } catch (err) {
+    showToast('Failed to save AI settings: ' + err.message, 'error')
+  } finally {
+    aiSaving.value = false
+  }
+}
+
+function copySmartToDumb() {
+  aiSettings.value.dumb = { ...aiSettings.value.smart }
+}
+
+async function sendAI() {
+  if (!aiQuery.value.trim()) return
+  if (aiMode.value === 'dumb' && !aiEnabled.value.dumb) {
+    showToast('Dumb AI is not configured', 'error')
+    return
+  }
+  if (!aiEnabled.value.smart && aiMode.value === 'smart') {
+    showToast('Smart AI is not configured', 'error')
+    return
+  }
+
+  aiBusy.value = true
+  aiNotes.value = ''
+  try {
+    const result = await sendAIChat({
+      mode: aiMode.value,
+      content_markdown: draftPost.value.content,
+      query: aiQuery.value,
+      web_search: aiUseSearch.value
+    })
+    const nextContent = result?.content_markdown || ''
+    if (!nextContent) {
+      showToast('AI response was empty', 'error')
+      return
+    }
+    const previous = draftPost.value.content
+    draftPost.value.content = nextContent
+    aiNotes.value = result?.notes || ''
+    if (aiHighlightEnabled.value) {
+      aiHighlight.value = { previous, current: nextContent, nonce: Date.now() }
+    } else {
+      aiHighlight.value = null
+    }
+    aiQuery.value = ''
+    showToast('AI changes applied')
+  } catch (err) {
+    showToast('AI request failed: ' + err.message, 'error')
+  } finally {
+    aiBusy.value = false
+  }
+}
+
 const createNewPost = () => {
   draftPost.value = {
     id: null,
@@ -372,6 +640,10 @@ const createNewPost = () => {
     content: '',
     tags: []
   }
+
+  aiNotes.value = ''
+  aiQuery.value = ''
+  aiHighlight.value = null
   
   // Check for autosaved new post
   const autosaved = localStorage.getItem('autosave_new')
@@ -430,6 +702,9 @@ const editPost = (post) => {
 
   originalPostJson.value = JSON.stringify(draftPost.value)
   currentView.value = 'editor'
+  aiQuery.value = ''
+  aiNotes.value = ''
+  aiHighlight.value = null
 }
 
 async function savePost() {
@@ -523,6 +798,7 @@ onMounted(() => {
   })
   // Load posts
   loadPosts()
+  loadAISettings()
 })
 
 watch(draftPost, (newVal) => {
@@ -535,7 +811,61 @@ watch(draftPost, (newVal) => {
   }
 }, { deep: true })
 
+watch(aiHighlightEnabled, (enabled) => {
+  if (!enabled) {
+    aiHighlight.value = null
+  }
+})
+
 onUnmounted(() => {
   window.removeEventListener('resize', handleResize)
 })
+
+function defaultAISettings() {
+  return {
+    smart: {
+      provider: '',
+      model: '',
+      api_key: '',
+      base_url: '',
+      temperature: null,
+      max_tokens: null
+    },
+    dumb: {
+      provider: '',
+      model: '',
+      api_key: '',
+      base_url: '',
+      temperature: null,
+      max_tokens: null
+    }
+  }
+}
+
+function normalizeAISettings(settings) {
+  const smartTemp = Number.isFinite(settings?.smart?.temperature) ? settings.smart.temperature : null
+  const smartMax = Number.isFinite(settings?.smart?.max_tokens) ? settings.smart.max_tokens : null
+  const dumbTemp = Number.isFinite(settings?.dumb?.temperature) ? settings.dumb.temperature : null
+  const dumbMax = Number.isFinite(settings?.dumb?.max_tokens) ? settings.dumb.max_tokens : null
+
+  return {
+    smart: {
+      provider: settings?.smart?.provider || '',
+      model: settings?.smart?.model || '',
+      api_key: settings?.smart?.api_key || '',
+      base_url: settings?.smart?.base_url || '',
+      temperature: smartTemp,
+      max_tokens: smartMax
+    },
+    dumb: {
+      provider: settings?.dumb?.provider || '',
+      model: settings?.dumb?.model || '',
+      api_key: settings?.dumb?.api_key || '',
+      base_url: settings?.dumb?.base_url || '',
+      temperature: dumbTemp,
+      max_tokens: dumbMax
+    }
+  }
+}
+
 </script>

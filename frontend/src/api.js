@@ -33,6 +33,19 @@ export async function deletePost(id) {
   await jsonRequest(`${base}/api/posts/${id}`, { method: 'DELETE' })
 }
 
+// AI Settings API
+export async function getAISettings() {
+  return jsonRequest(`${base}/api/ai/settings`)
+}
+
+export async function updateAISettings(data) {
+  return jsonRequest(`${base}/api/ai/settings`, { method: 'PUT', body: JSON.stringify(data) })
+}
+
+export async function sendAIChat(data) {
+  return jsonRequest(`${base}/api/ai/chat`, { method: 'POST', body: JSON.stringify(data) })
+}
+
 // Image API
 export async function isImageUploadEnabled() {
   const result = await jsonRequest(`${base}/api/images/enabled`)

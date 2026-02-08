@@ -25,6 +25,10 @@ type ImageStore interface {
 
 // BlogStore defines the persistence contract the host application must satisfy.
 type BlogStore interface {
+	// Migrate applies any pending migrations required by the store implementation.
+	// Implementations should be idempotent and safe to call on every startup.
+	Migrate(ctx context.Context) error
+
 	// Public methods
 	GetPublishedPostBySlug(ctx context.Context, slug string) (*Post, error)
 	ListPublishedPosts(ctx context.Context, limit, offset int) ([]Post, error)
@@ -36,4 +40,8 @@ type BlogStore interface {
 	GetPostByID(ctx context.Context, id string) (*Post, error)
 	DeletePost(ctx context.Context, id string) error
 	ListAllPosts(ctx context.Context, limit, offset int) ([]Post, error)
+
+	// AI settings
+	GetAISettings(ctx context.Context) (*AISettings, error)
+	UpdateAISettings(ctx context.Context, settings *AISettings) error
 }

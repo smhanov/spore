@@ -144,21 +144,10 @@ func main() {
 	}
 	defer db.Close()
 
-	// Initialize tables
-	schemas := []string{
-		blog.SchemaBlogPosts,
-		blog.SchemaBlogTags,
-		blog.SchemaBlogPostTags,
-	}
-
-	for _, schema := range schemas {
-		_, err := db.Exec(schema)
-		if err != nil {
-			log.Fatalf("Failed to execute schema: %v", err)
-		}
-	}
-
 	store := blog.NewSQLXStore(db)
+	if err := store.Migrate(context.Background()); err != nil {
+		log.Fatalf("Failed to run migrations: %v", err)
+	}
 	ctx := context.Background()
 
 	fmt.Println("Seeding posts...")

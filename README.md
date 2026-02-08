@@ -176,6 +176,9 @@ The `BlogStore` interface defines the persistence contract your application must
 
 ```go
 type BlogStore interface {
+    // Migrate applies any pending schema changes for the store.
+    Migrate(ctx context.Context) error
+
     // Public methods - used for rendering the blog
     GetPublishedPostBySlug(ctx context.Context, slug string) (*Post, error)
     ListPublishedPosts(ctx context.Context, limit, offset int) ([]Post, error)
@@ -194,6 +197,9 @@ type BlogStore interface {
 
 The package includes a ready-to-use SQLX implementation:
 
+Migrations are applied automatically when `blog.NewHandler` is called, so you
+do not need to run them manually.
+
 ```go
 import (
     "github.com/jmoiron/sqlx"
@@ -207,11 +213,6 @@ func main() {
         log.Fatal(err)
     }
 
-    // Run migrations
-    db.MustExec(blog.SchemaBlogPosts)
-    db.MustExec(blog.SchemaBlogTags)
-    db.MustExec(blog.SchemaBlogPostTags)
-
     store := blog.NewSQLXStore(db)
     // Use store in your Config...
 }
@@ -219,7 +220,8 @@ func main() {
 
 ### Database Schema
 
-The package exports schema constants for migrations:
+The package exports schema constants used by the built-in migrations. You can also
+reuse them in your own tooling if needed:
 
 ```go
 // SchemaBlogPosts creates the main posts table
@@ -264,6 +266,10 @@ type memoryStore struct {
 
 func newMemoryStore() *memoryStore {
     return &memoryStore{posts: map[string]blog.Post{}}
+}
+
+func (m *memoryStore) Migrate(ctx context.Context) error {
+    return nil
 }
 
 func (m *memoryStore) GetPublishedPostBySlug(ctx context.Context, slug string) (*blog.Post, error) {

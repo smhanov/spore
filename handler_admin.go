@@ -20,6 +20,10 @@ func (s *service) mountAdminRoutes(r chi.Router) {
 		r.Put("/posts/{id}", s.handleAdminUpdatePost)
 		r.Delete("/posts/{id}", s.handleAdminDeletePost)
 
+		r.Get("/ai/settings", s.handleAdminGetAISettings)
+		r.Put("/ai/settings", s.handleAdminUpdateAISettings)
+		r.Post("/ai/chat", s.handleAdminAIChat)
+
 		// Image endpoints (only available if ImageStore is configured)
 		r.Get("/images/enabled", s.handleImagesEnabled)
 		r.Post("/images", s.handleUploadImage)

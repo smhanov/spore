@@ -18,6 +18,11 @@ import (
 type memoryStore struct {
 	mu    sync.RWMutex
 	posts map[string]blog.Post // keyed by ID
+	ai    *blog.AISettings
+}
+
+func (m *memoryStore) Migrate(ctx context.Context) error {
+	return nil
 }
 
 func newMemoryStore() *memoryStore {
@@ -146,6 +151,28 @@ func (m *memoryStore) ListAllPosts(ctx context.Context, limit, offset int) ([]bl
 		end = len(posts)
 	}
 	return posts[offset:end], nil
+}
+
+func (m *memoryStore) GetAISettings(ctx context.Context) (*blog.AISettings, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if m.ai == nil {
+		return nil, nil
+	}
+	copy := *m.ai
+	return &copy, nil
+}
+
+func (m *memoryStore) UpdateAISettings(ctx context.Context, settings *blog.AISettings) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if settings == nil {
+		m.ai = nil
+		return nil
+	}
+	copy := *settings
+	m.ai = &copy
+	return nil
 }
 
 func main() {

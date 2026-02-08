@@ -1,6 +1,7 @@
 package blog
 
 import (
+	"context"
 	"embed"
 	"fmt"
 	"html/template"
@@ -40,6 +41,9 @@ type service struct {
 func NewHandler(cfg Config) (http.Handler, error) {
 	if cfg.Store == nil {
 		return nil, fmt.Errorf("store is required")
+	}
+	if err := cfg.Store.Migrate(context.Background()); err != nil {
+		return nil, fmt.Errorf("run migrations: %w", err)
 	}
 
 	routePrefix := cfg.RoutePrefix

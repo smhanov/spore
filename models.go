@@ -21,3 +21,19 @@ type Tag struct {
 	Name string `json:"name" db:"name"`
 	Slug string `json:"slug" db:"slug"`
 }
+
+// AIProviderSettings holds configuration for a single LLM provider.
+type AIProviderSettings struct {
+	Provider    string   `json:"provider" db:"provider"`
+	Model       string   `json:"model" db:"model"`
+	APIKey      string   `json:"api_key" db:"api_key"`
+	BaseURL     string   `json:"base_url" db:"base_url"`
+	Temperature *float64 `json:"temperature" db:"temperature"`
+	MaxTokens   *int     `json:"max_tokens" db:"max_tokens"`
+}
+
+// AISettings stores the smart and dumb LLM configurations.
+type AISettings struct {
+	Smart AIProviderSettings `json:"smart"`
+	Dumb  AIProviderSettings `json:"dumb"`
+}
