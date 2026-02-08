@@ -204,16 +204,33 @@ func parseAIResponse(text string) (string, string) {
 	}{}
 
 	if json.Unmarshal([]byte(trimmed), &payload) == nil {
-		return payload.ContentMarkdown, payload.Notes
+		return unwrapNestedJSON(payload.ContentMarkdown, payload.Notes)
 	}
 
 	if obj, ok := extractJSONObject(trimmed); ok {
 		if json.Unmarshal([]byte(obj), &payload) == nil {
-			return payload.ContentMarkdown, payload.Notes
+			return unwrapNestedJSON(payload.ContentMarkdown, payload.Notes)
 		}
 	}
 
 	return trimmed, ""
+}
+
+// unwrapNestedJSON detects when the AI model double-nests its JSON response
+// (i.e. content_markdown itself is a JSON string with a content_markdown key)
+// and recursively unwraps it.
+func unwrapNestedJSON(content, notes string) (string, string) {
+	inner := struct {
+		ContentMarkdown string `json:"content_markdown"`
+		Notes           string `json:"notes"`
+	}{}
+	if json.Unmarshal([]byte(strings.TrimSpace(content)), &inner) == nil && inner.ContentMarkdown != "" {
+		if notes == "" {
+			notes = inner.Notes
+		}
+		return unwrapNestedJSON(inner.ContentMarkdown, notes)
+	}
+	return content, notes
 }
 
 func extractJSONObject(text string) (string, bool) {
@@ -242,7 +259,7 @@ type commentSpamResult struct {
 }
 
 var (
-	markdownCodeBlockRe = regexp.MustCompile("(?s)```.*?```")
+	markdownCodeBlockRe  = regexp.MustCompile("(?s)```.*?```")
 	markdownInlineCodeRe = regexp.MustCompile("`[^`]*`")
 	markdownImageRe      = regexp.MustCompile(`!\[([^\]]*)\]\([^\)]*\)`)
 	markdownLinkRe       = regexp.MustCompile(`\[(.*?)\]\([^\)]*\)`)
@@ -363,4 +380,142 @@ func parseCommentSpamResponse(text string) (bool, string) {
 	}
 
 	return false, ""
+}
+
+// generatePostTags asynchronously generates tags for a post using the dumb AI.
+func (s *service) generatePostTags(postID string) {
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+
+		post, err := s.cfg.Store.GetPostByID(ctx, postID)
+		if err != nil || post == nil {
+			return
+		}
+
+		settings, err := s.cfg.Store.GetAISettings(ctx)
+		if err != nil || settings == nil || !aiProviderConfigured(settings.Dumb) {
+			return
+		}
+
+		client, err := newLLMClient(settings.Dumb, false)
+		if err != nil {
+			return
+		}
+
+		prompt := buildTaggingPrompt(post.Title, post.ContentMarkdown)
+		resp, err := client.Generate(ctx, prompt)
+		if err != nil {
+			return
+		}
+
+		tags := parseTaggingResponse(resp.Text())
+		if len(tags) == 0 {
+			return
+		}
+
+		_ = s.cfg.Store.SetPostTags(ctx, postID, tags)
+	}()
+}
+
+func buildTaggingPrompt(title, content string) []*llmhub.Message {
+	plainText := markdownToPlainText(content)
+	excerpt := trimToLength(plainText, 3000)
+
+	system := llmhub.NewSystemMessage(llmhub.Text(
+		`You are an expert content taxonomy system. Your goal is to analyze blog posts and generate a list of relevant, specific tags that will be used to calculate content similarity and recommend related reading.
+
+Tagging Guidelines:
+
+Specificity: Avoid generic tags (e.g., avoid "Update", "General", "News", "Thoughts"). Prefer specific entities, technologies, or distinct concepts (e.g., use "Go", "Distributed Systems", "Options Trading", "Vue3").
+
+Granularity: Aim for a mix of broad categories (1-2 tags) and specific niches (3-4 tags).
+
+Quantity: Generate exactly 5 to 8 tags per post.
+
+Format: Output strictly a JSON array of strings. Lowercase all tags. Remove punctuation/hashtags.
+
+Relevance: A tag must be central to the post, not just a keyword mentioned once in passing.
+
+Example 1: Input Title: "Understanding Goroutines and Channels" Input Content: [Discussion about concurrency patterns in Go...] Output: ["go", "golang", "concurrency", "goroutines", "channels", "backend development"]
+
+Example 2: Input Title: "My travels to Japan and the best Ramen I ate" Input Content: [Travel log about Tokyo and food...] Output: ["travel", "japan", "tokyo", "food", "ramen", "culinary tourism"]`,
+	))
+	user := llmhub.NewUserMessage(llmhub.Text(
+		"Analyze the following post and return the JSON array of tags.\n\nTitle: " + title + "\nContent: " + excerpt,
+	))
+	return []*llmhub.Message{system, user}
+}
+
+func parseTaggingResponse(text string) []string {
+	trimmed := strings.TrimSpace(text)
+	if trimmed == "" {
+		return nil
+	}
+
+	// Try to parse as JSON array directly
+	var tags []string
+	if json.Unmarshal([]byte(trimmed), &tags) == nil {
+		return cleanTags(tags)
+	}
+
+	// Try to extract JSON array from the response
+	if arr, ok := extractJSONArray(trimmed); ok {
+		if json.Unmarshal([]byte(arr), &tags) == nil {
+			return cleanTags(tags)
+		}
+	}
+
+	return nil
+}
+
+func extractJSONArray(text string) (string, bool) {
+	start := strings.Index(text, "[")
+	end := strings.LastIndex(text, "]")
+	if start == -1 || end == -1 || end <= start {
+		return "", false
+	}
+	return text[start : end+1], true
+}
+
+func cleanTags(tags []string) []string {
+	var result []string
+	seen := map[string]bool{}
+	for _, t := range tags {
+		t = strings.ToLower(strings.TrimSpace(t))
+		t = strings.Trim(t, "#")
+		if t == "" || seen[t] {
+			continue
+		}
+		seen[t] = true
+		result = append(result, t)
+	}
+	if len(result) > 8 {
+		result = result[:8]
+	}
+	return result
+}
+
+// contentSignificantlyChanged checks if the markdown content has changed enough to re-tag.
+func contentSignificantlyChanged(oldContent, newContent string) bool {
+	old := strings.TrimSpace(oldContent)
+	new_ := strings.TrimSpace(newContent)
+	if old == new_ {
+		return false
+	}
+	if old == "" && new_ != "" {
+		return true
+	}
+	// Simple heuristic: if at least 10% of the content changed by length
+	oldLen := len([]rune(old))
+	newLen := len([]rune(new_))
+	diff := newLen - oldLen
+	if diff < 0 {
+		diff = -diff
+	}
+	threshold := oldLen / 10
+	if threshold < 50 {
+		threshold = 50
+	}
+	return diff >= threshold
 }

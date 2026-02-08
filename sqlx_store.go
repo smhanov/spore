@@ -172,6 +172,11 @@ func (s *SQLXStore) GetPublishedPostBySlug(ctx context.Context, slug string) (*P
 		}
 		return nil, err
 	}
+	tags, err := s.GetPostTags(ctx, p.ID)
+	if err != nil {
+		return nil, err
+	}
+	p.Tags = tags
 	return &p, nil
 }
 
@@ -179,6 +184,9 @@ func (s *SQLXStore) ListPublishedPosts(ctx context.Context, limit, offset int) (
 	posts := []Post{}
 	err := s.DB.SelectContext(ctx, &posts, `SELECT id, slug, title, content_markdown, content_html, published_at, meta_description, author_id FROM blog_posts WHERE published_at IS NOT NULL ORDER BY published_at DESC LIMIT $1 OFFSET $2`, limit, offset)
 	if err != nil {
+		return nil, err
+	}
+	if err := s.LoadPostsTags(ctx, posts); err != nil {
 		return nil, err
 	}
 	return posts, nil
@@ -195,6 +203,9 @@ WHERE t.slug = $1 AND p.published_at IS NOT NULL
 ORDER BY p.published_at DESC
 LIMIT $2 OFFSET $3`, tagSlug, limit, offset)
 	if err != nil {
+		return nil, err
+	}
+	if err := s.LoadPostsTags(ctx, posts); err != nil {
 		return nil, err
 	}
 	return posts, nil
@@ -224,6 +235,11 @@ func (s *SQLXStore) GetPostByID(ctx context.Context, id string) (*Post, error) {
 		}
 		return nil, err
 	}
+	tags, err := s.GetPostTags(ctx, p.ID)
+	if err != nil {
+		return nil, err
+	}
+	p.Tags = tags
 	return &p, nil
 }
 
@@ -236,6 +252,9 @@ func (s *SQLXStore) ListAllPosts(ctx context.Context, limit, offset int) ([]Post
 	posts := []Post{}
 	err := s.DB.SelectContext(ctx, &posts, `SELECT id, slug, title, content_markdown, content_html, published_at, meta_description, author_id FROM blog_posts ORDER BY COALESCE(published_at, '9999-12-31') DESC LIMIT $1 OFFSET $2`, limit, offset)
 	if err != nil {
+		return nil, err
+	}
+	if err := s.LoadPostsTags(ctx, posts); err != nil {
 		return nil, err
 	}
 	return posts, nil
@@ -464,4 +483,143 @@ JOIN blog_posts p ON p.id = c.post_id`
 func (s *SQLXStore) DeleteCommentByID(ctx context.Context, id string) error {
 	_, err := s.DB.ExecContext(ctx, `DELETE FROM blog_comments WHERE id = $1`, id)
 	return err
+}
+
+// SetPostTags replaces all tags for a post. Creates new tags as needed.
+func (s *SQLXStore) SetPostTags(ctx context.Context, postID string, tagNames []string) error {
+	tx, err := s.DB.BeginTxx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if err != nil {
+			_ = tx.Rollback()
+		}
+	}()
+
+	// Remove existing tags for the post
+	if _, err = tx.ExecContext(ctx, `DELETE FROM blog_post_tags WHERE post_id = $1`, postID); err != nil {
+		return err
+	}
+
+	for _, name := range tagNames {
+		name = strings.TrimSpace(name)
+		if name == "" {
+			continue
+		}
+		slug := tagSlug(name)
+
+		// Upsert the tag
+		var tagID string
+		err = tx.GetContext(ctx, &tagID, `SELECT id FROM blog_tags WHERE slug = $1`, slug)
+		if err != nil {
+			tagID = generateID()
+			if _, err = tx.ExecContext(ctx, `INSERT INTO blog_tags (id, name, slug) VALUES ($1, $2, $3)`, tagID, name, slug); err != nil {
+				return err
+			}
+		}
+
+		// Link tag to post
+		if _, err = tx.ExecContext(ctx, `INSERT INTO blog_post_tags (post_id, tag_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`, postID, tagID); err != nil {
+			return err
+		}
+	}
+
+	return tx.Commit()
+}
+
+// GetPostTags returns all tags for a given post.
+func (s *SQLXStore) GetPostTags(ctx context.Context, postID string) ([]Tag, error) {
+	tags := []Tag{}
+	err := s.DB.SelectContext(ctx, &tags, `
+SELECT t.id, t.name, t.slug
+FROM blog_tags t
+JOIN blog_post_tags pt ON pt.tag_id = t.id
+WHERE pt.post_id = $1
+ORDER BY t.name`, postID)
+	if err != nil {
+		return nil, err
+	}
+	return tags, nil
+}
+
+// LoadPostsTags populates the Tags field on each post in the slice.
+func (s *SQLXStore) LoadPostsTags(ctx context.Context, posts []Post) error {
+	if len(posts) == 0 {
+		return nil
+	}
+	ids := make([]string, len(posts))
+	for i, p := range posts {
+		ids[i] = p.ID
+	}
+
+	type postTag struct {
+		PostID string `db:"post_id"`
+		Tag
+	}
+
+	query, args, err := sqlx.In(`
+SELECT pt.post_id, t.id, t.name, t.slug
+FROM blog_tags t
+JOIN blog_post_tags pt ON pt.tag_id = t.id
+WHERE pt.post_id IN (?)
+ORDER BY t.name`, ids)
+	if err != nil {
+		return err
+	}
+	query = s.DB.Rebind(query)
+
+	var rows []postTag
+	if err := s.DB.SelectContext(ctx, &rows, query, args...); err != nil {
+		return err
+	}
+
+	tagMap := map[string][]Tag{}
+	for _, r := range rows {
+		tagMap[r.PostID] = append(tagMap[r.PostID], r.Tag)
+	}
+	for i := range posts {
+		posts[i].Tags = tagMap[posts[i].ID]
+		if posts[i].Tags == nil {
+			posts[i].Tags = []Tag{}
+		}
+	}
+	return nil
+}
+
+// GetRelatedPosts finds posts related to the given post based on shared tags.
+func (s *SQLXStore) GetRelatedPosts(ctx context.Context, postID string, limit int) ([]Post, error) {
+	posts := []Post{}
+	err := s.DB.SelectContext(ctx, &posts, `
+SELECT p.id, p.slug, p.title, p.content_markdown, p.content_html, p.published_at, p.meta_description, p.author_id
+FROM blog_posts p
+JOIN blog_post_tags pt ON pt.post_id = p.id
+JOIN blog_post_tags pt2 ON pt2.tag_id = pt.tag_id AND pt2.post_id = $1
+WHERE p.id != $1 AND p.published_at IS NOT NULL
+GROUP BY p.id
+ORDER BY COUNT(pt.tag_id) DESC, p.published_at DESC
+LIMIT $2`, postID, limit)
+	if err != nil {
+		return nil, err
+	}
+	return posts, nil
+}
+
+// tagSlug converts a tag name to a URL-friendly slug.
+func tagSlug(name string) string {
+	s := strings.ToLower(strings.TrimSpace(name))
+	s = strings.Map(func(r rune) rune {
+		if r >= 'a' && r <= 'z' || r >= '0' && r <= '9' {
+			return r
+		}
+		if r == ' ' || r == '-' || r == '_' {
+			return '-'
+		}
+		return -1
+	}, s)
+	// Collapse multiple dashes
+	for strings.Contains(s, "--") {
+		s = strings.ReplaceAll(s, "--", "-")
+	}
+	return strings.Trim(s, "-")
 }

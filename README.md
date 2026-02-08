@@ -7,7 +7,8 @@ Spore is a drop-in blogging handler for Go web apps. It renders public pages wit
 - 🎨 Customizable templates and CSS
 - 🔒 Pluggable admin authentication middleware
 - 🗄️ Flexible storage backend (implement your own or use the included SQLX reference)
-- 🏷️ Tag support for organizing posts
+- 🏷️ AI-powered auto-tagging with tag-based filtering
+- 🔗 Related posts section based on shared tags
 - 📊 SEO-friendly with meta descriptions and structured data
 - 🤖 Programmatic SEO capabilities for LLM-optimized content generation
 - 💬 Public comments with one-level replies, @mentions, and owner-only edit/delete
@@ -18,6 +19,8 @@ Spore is a drop-in blogging handler for Go web apps. It renders public pages wit
 
 - [Installation](#installation)
 - [Quick Start](#quick-start)
+- [AI Auto-Tagging](#ai-auto-tagging)
+- [Related Posts](#related-posts)
 - [Programmatic SEO](#programmatic-seo)
 - [Configuration](#configuration)
 - [Comments](#comments)
@@ -79,6 +82,68 @@ Spore is designed with programmatic SEO in mind, enabling automatic generation o
 - Build content that ranks well in both traditional search engines and AI-powered search
 
 _Note: Programmatic SEO features are under active development and will be available in future releases._
+
+## AI Auto-Tagging
+
+Spore automatically generates tags for every blog post using the configured "dumb" AI provider. Tags are generated asynchronously whenever a post is created or substantially updated (≥10% content change or 50+ character difference).
+
+### How It Works
+
+1. **Post saved** — When a post is created or updated with significant content changes, the system fires an async background task.
+2. **AI analyzes content** — The dumb AI receives the post title and a plain-text excerpt (up to 3,000 characters) and returns 5–8 specific, lowercase tags.
+3. **Tags stored** — Tags are upserted into the `blog_tags` table and linked to the post via `blog_post_tags`. Existing tags for the post are replaced.
+4. **Tags displayed** — Tags appear as clickable pills on both the post detail page and the post listing. Clicking a tag filters the listing to show only posts with that tag.
+
+### Requirements
+
+- A "dumb" AI provider must be configured in the admin AI Settings page (e.g., a fast, inexpensive model like GPT-4o-mini or Gemini Flash).
+- If no dumb AI is configured, posts are simply saved without tags.
+
+### Tag Filtering
+
+Public visitors can filter posts by tag using the URL pattern:
+
+```
+GET <prefix>/tag/{tagSlug}
+```
+
+For example, `/blog/tag/golang` shows all published posts tagged with "golang".
+
+### Admin Tag Display
+
+Tags are displayed in the admin editor's right sidebar under "SEO & Settings". They update automatically after the next page load following a save.
+
+## Related Posts
+
+Each blog post page includes a "Related Posts" section at the bottom (above comments). Related posts are determined by counting shared tags between posts — posts with the most tags in common appear first.
+
+### Features
+
+- **Automatic**: No manual curation needed. Related posts are computed from shared tags.
+- **Visual cards**: Each related post is displayed as a card with:
+  - The first image found in the post content (or a placeholder icon)
+  - The post title
+  - A short plain-text excerpt (up to 150 characters)
+  - Tag pills
+- **Up to 4 posts**: The section shows a maximum of 4 related posts.
+- **Responsive grid**: Cards flow into a responsive CSS grid that collapses to a single column on mobile.
+
+### How Similarity Is Calculated
+
+The algorithm is simple and fast:
+
+```sql
+SELECT p.*, COUNT(shared_tags) as relevance
+FROM blog_posts p
+JOIN blog_post_tags pt  ON pt.post_id = p.id
+JOIN blog_post_tags pt2 ON pt2.tag_id = pt.tag_id AND pt2.post_id = :current_post_id
+WHERE p.id != :current_post_id AND p.published_at IS NOT NULL
+GROUP BY p.id
+ORDER BY relevance DESC, p.published_at DESC
+LIMIT 4
+```
+
+Posts with more shared tags rank higher. Ties are broken by publication date (newest first). If a post has no tags, the section is simply omitted.
 
 ## Configuration
 
@@ -205,6 +270,14 @@ type BlogStore interface {
     GetPostByID(ctx context.Context, id string) (*Post, error)
     DeletePost(ctx context.Context, id string) error
     ListAllPosts(ctx context.Context, limit, offset int) ([]Post, error)
+
+    // Tags
+    SetPostTags(ctx context.Context, postID string, tagNames []string) error
+    GetPostTags(ctx context.Context, postID string) ([]Tag, error)
+    LoadPostsTags(ctx context.Context, posts []Post) error
+
+    // Related posts
+    GetRelatedPosts(ctx context.Context, postID string, limit int) ([]Post, error)
 
     // Blog settings
     GetBlogSettings(ctx context.Context) (*BlogSettings, error)
@@ -547,9 +620,10 @@ Templates receive the following data:
 
 ```go
 map[string]any{
-    "Posts":       []Post,      // List of published posts
-    "RoutePrefix": string,      // e.g., "/blog"
-    "CustomCSS":   []string,    // Custom CSS URLs
+    \"Posts\":       []Post,      // List of published posts (with Tags populated)
+    \"RoutePrefix\": string,      // e.g., \"/blog\"
+    \"CustomCSS\":   []string,    // Custom CSS URLs
+    \"TagSlug\":     string,      // Set when filtering by tag (e.g., \"golang\")
 }
 ```
 
@@ -557,9 +631,11 @@ map[string]any{
 
 ```go
 map[string]any{
-    "Post":        *Post,       // The full post object
-    "RoutePrefix": string,      // e.g., "/blog"
-    "CustomCSS":   []string,    // Custom CSS URLs
+    \"Post\":            *Post,          // The full post object (with Tags populated)
+    \"RoutePrefix\":     string,         // e.g., \"/blog\"
+    \"CustomCSS\":       []string,       // Custom CSS URLs
+    \"CommentsEnabled\": bool,           // Whether comments are enabled
+    \"RelatedPosts\":    []RelatedPost,  // Up to 4 related posts with images/excerpts
 }
 ```
 
@@ -593,10 +669,11 @@ The build output in `frontend/dist` is automatically embedded when you build you
 
 ### Public Routes
 
-| Method | Path              | Description                                         |
-| ------ | ----------------- | --------------------------------------------------- |
-| GET    | `<prefix>/`       | List published posts (supports `?limit=N&offset=N`) |
-| GET    | `<prefix>/{slug}` | View a single published post                        |
+| Method | Path                     | Description                                           |
+| ------ | ------------------------ | ----------------------------------------------------- |
+| GET    | `<prefix>/`              | List published posts (supports `?limit=N&offset=N`)   |
+| GET    | `<prefix>/tag/{tagSlug}` | List published posts filtered by tag                  |
+| GET    | `<prefix>/{slug}`        | View a single published post (includes related posts) |
 
 ### Admin API Routes
 
@@ -678,6 +755,18 @@ type Tag struct {
     ID   string `json:"id"`
     Name string `json:"name"`   // Display name
     Slug string `json:"slug"`   // URL-friendly identifier
+}
+```
+
+### RelatedPost
+
+Used internally in the post detail template to display related reading:
+
+```go
+type RelatedPost struct {
+    Post
+    FirstImage string  // URL of the first <img> found in the post HTML
+    Excerpt    string  // Plain-text excerpt (up to 150 characters)
 }
 ```
 

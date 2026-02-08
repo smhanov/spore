@@ -41,6 +41,14 @@ type BlogStore interface {
 	DeletePost(ctx context.Context, id string) error
 	ListAllPosts(ctx context.Context, limit, offset int) ([]Post, error)
 
+	// Tags
+	SetPostTags(ctx context.Context, postID string, tagNames []string) error
+	GetPostTags(ctx context.Context, postID string) ([]Tag, error)
+	LoadPostsTags(ctx context.Context, posts []Post) error
+
+	// Related posts
+	GetRelatedPosts(ctx context.Context, postID string, limit int) ([]Post, error)
+
 	// AI settings
 	GetAISettings(ctx context.Context) (*AISettings, error)
 	UpdateAISettings(ctx context.Context, settings *AISettings) error

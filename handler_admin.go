@@ -105,6 +105,10 @@ func (s *service) handleAdminCreatePost(w http.ResponseWriter, r *http.Request) 
 		http.Error(w, "failed to create post", http.StatusInternalServerError)
 		return
 	}
+	// Trigger async tag generation for new posts with content
+	if strings.TrimSpace(p.ContentMarkdown) != "" {
+		s.generatePostTags(p.ID)
+	}
 	writeJSON(w, p)
 }
 
@@ -122,6 +126,10 @@ func (s *service) handleAdminUpdatePost(w http.ResponseWriter, r *http.Request) 
 		http.Error(w, "id mismatch", http.StatusBadRequest)
 		return
 	}
+
+	// Load old post to detect content changes
+	oldPost, _ := s.cfg.Store.GetPostByID(r.Context(), id)
+
 	// Convert markdown to HTML
 	if p.ContentMarkdown != "" {
 		html, err := markdownToHTML(p.ContentMarkdown)
@@ -135,6 +143,16 @@ func (s *service) handleAdminUpdatePost(w http.ResponseWriter, r *http.Request) 
 		http.Error(w, "failed to update post", http.StatusInternalServerError)
 		return
 	}
+
+	// Re-generate tags if content changed substantially
+	oldContent := ""
+	if oldPost != nil {
+		oldContent = oldPost.ContentMarkdown
+	}
+	if contentSignificantlyChanged(oldContent, p.ContentMarkdown) {
+		s.generatePostTags(p.ID)
+	}
+
 	writeJSON(w, p)
 }
 

@@ -20,6 +20,10 @@ type mockStore struct {
 	updateFn                 func(ctx context.Context, p *Post) error
 	getByIDFn                func(ctx context.Context, id string) (*Post, error)
 	deleteFn                 func(ctx context.Context, id string) error
+	setPostTagsFn            func(ctx context.Context, postID string, tagNames []string) error
+	getPostTagsFn            func(ctx context.Context, postID string) ([]Tag, error)
+	loadPostsTagsFn          func(ctx context.Context, posts []Post) error
+	getRelatedPostsFn        func(ctx context.Context, postID string, limit int) ([]Post, error)
 	getAIFn                  func(ctx context.Context) (*AISettings, error)
 	updateAIFn               func(ctx context.Context, settings *AISettings) error
 	getSettingsFn            func(ctx context.Context) (*BlogSettings, error)
@@ -88,6 +92,34 @@ func (m *mockStore) DeletePost(ctx context.Context, id string) error {
 		return m.deleteFn(ctx, id)
 	}
 	return nil
+}
+
+func (m *mockStore) SetPostTags(ctx context.Context, postID string, tagNames []string) error {
+	if m.setPostTagsFn != nil {
+		return m.setPostTagsFn(ctx, postID, tagNames)
+	}
+	return nil
+}
+
+func (m *mockStore) GetPostTags(ctx context.Context, postID string) ([]Tag, error) {
+	if m.getPostTagsFn != nil {
+		return m.getPostTagsFn(ctx, postID)
+	}
+	return []Tag{}, nil
+}
+
+func (m *mockStore) LoadPostsTags(ctx context.Context, posts []Post) error {
+	if m.loadPostsTagsFn != nil {
+		return m.loadPostsTagsFn(ctx, posts)
+	}
+	return nil
+}
+
+func (m *mockStore) GetRelatedPosts(ctx context.Context, postID string, limit int) ([]Post, error) {
+	if m.getRelatedPostsFn != nil {
+		return m.getRelatedPostsFn(ctx, postID, limit)
+	}
+	return []Post{}, nil
 }
 
 func (m *mockStore) ListAllPosts(ctx context.Context, limit, offset int) ([]Post, error) {

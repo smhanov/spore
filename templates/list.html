@@ -1,4 +1,13 @@
 {{define "content"}}
+  {{if .TagSlug}}
+    <div class="card" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;">
+      <div>
+        <h2 style="margin:0 0 4px">Posts tagged "{{.TagSlug}}"</h2>
+        <p style="margin:0;color:#6b7280;font-size:14px;">Showing posts filtered by this tag.</p>
+      </div>
+      <a href="{{.RoutePrefix}}/" style="font-size:14px;">← All posts</a>
+    </div>
+  {{end}}
   {{if not .Posts}}
     <div class="card">No posts yet.</div>
   {{else}}
@@ -7,6 +16,13 @@
         <h2><a href="{{$.RoutePrefix}}/{{.Slug}}">{{.Title}}</a></h2>
         {{if .PublishedAt}}<p style="color:#6b7280;">Published {{.PublishedAt.Format "Jan 2, 2006"}}</p>{{end}}
         {{if .MetaDescription}}<p>{{.MetaDescription}}</p>{{end}}
+        {{if .Tags}}
+        <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px;">
+          {{range .Tags}}
+            <a href="{{$.RoutePrefix}}/tag/{{.Slug}}" style="display:inline-block;padding:3px 10px;background:#eef2ff;color:#4338ca;font-size:12px;font-weight:600;border-radius:999px;text-decoration:none;">{{.Name}}</a>
+          {{end}}
+        </div>
+        {{end}}
       </article>
     {{end}}
   {{end}}

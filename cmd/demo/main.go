@@ -124,6 +124,44 @@ func (m *memoryStore) DeletePost(ctx context.Context, id string) error {
 	return nil
 }
 
+func (m *memoryStore) SetPostTags(ctx context.Context, postID string, tagNames []string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	p, ok := m.posts[postID]
+	if !ok {
+		return nil
+	}
+	var tags []blog.Tag
+	for _, name := range tagNames {
+		name = strings.TrimSpace(name)
+		if name == "" {
+			continue
+		}
+		tags = append(tags, blog.Tag{ID: name, Name: name, Slug: strings.ToLower(strings.ReplaceAll(name, " ", "-"))})
+	}
+	p.Tags = tags
+	m.posts[postID] = p
+	return nil
+}
+
+func (m *memoryStore) GetPostTags(ctx context.Context, postID string) ([]blog.Tag, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	p, ok := m.posts[postID]
+	if !ok {
+		return []blog.Tag{}, nil
+	}
+	return p.Tags, nil
+}
+
+func (m *memoryStore) LoadPostsTags(ctx context.Context, posts []blog.Post) error {
+	return nil
+}
+
+func (m *memoryStore) GetRelatedPosts(ctx context.Context, postID string, limit int) ([]blog.Post, error) {
+	return []blog.Post{}, nil
+}
+
 func (m *memoryStore) ListAllPosts(ctx context.Context, limit, offset int) ([]blog.Post, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
