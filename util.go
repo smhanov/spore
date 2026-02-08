@@ -2,6 +2,8 @@ package blog
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 
 	"github.com/google/uuid"
 	"github.com/yuin/goldmark"
@@ -9,6 +11,15 @@ import (
 
 func generateID() string {
 	return uuid.New().String()
+}
+
+func generateToken() string {
+	return uuid.New().String()
+}
+
+func hashToken(token string) string {
+	sum := sha256.Sum256([]byte(token))
+	return hex.EncodeToString(sum[:])
 }
 
 // markdownToHTML converts markdown content to HTML using goldmark.

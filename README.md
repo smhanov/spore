@@ -10,6 +10,9 @@ Spore is a drop-in blogging handler for Go web apps. It renders public pages wit
 - 🏷️ Tag support for organizing posts
 - 📊 SEO-friendly with meta descriptions and structured data
 - 🤖 Programmatic SEO capabilities for LLM-optimized content generation
+- 💬 Public comments with one-level replies, @mentions, and owner-only edit/delete
+- 🧹 Admin moderation tools with instant hide/delete
+- 🛡️ Optional dumb-AI spam checks with automatic rejection
 
 ## Table of Contents
 
@@ -17,6 +20,7 @@ Spore is a drop-in blogging handler for Go web apps. It renders public pages wit
 - [Quick Start](#quick-start)
 - [Programmatic SEO](#programmatic-seo)
 - [Configuration](#configuration)
+- [Comments](#comments)
 - [Implementing the BlogStore Interface](#implementing-the-blogstore-interface)
 - [Image Storage](#image-storage)
 - [Templates](#templates)
@@ -61,6 +65,7 @@ go run ./cmd/demo
 ```
 
 Then visit:
+
 - **Blog**: [http://localhost:8080/blog](http://localhost:8080/blog)
 - **Admin UI**: [http://localhost:8080/blog/admin](http://localhost:8080/blog/admin)
 
@@ -73,7 +78,7 @@ Spore is designed with programmatic SEO in mind, enabling automatic generation o
 - Create topic clusters and internal linking strategies automatically
 - Build content that ranks well in both traditional search engines and AI-powered search
 
-*Note: Programmatic SEO features are under active development and will be available in future releases.*
+_Note: Programmatic SEO features are under active development and will be available in future releases._
 
 ## Configuration
 
@@ -137,6 +142,16 @@ func main() {
 }
 ```
 
+## Comments
+
+Spore includes a built-in commenting system for public posts. Visitors can leave comments without logging in, reply one level deep, and @mention other commenters. Users can edit or delete their own comments later as long as they are using the same browser.
+
+The admin UI adds a moderation queue where you can instantly approve, hide, reject, or delete comments. Comments can be globally enabled or disabled from the Comments settings page.
+
+### AI Spam Elimination
+
+If a "dumb" AI provider is configured in the admin settings, new comments are created in a pending state and asynchronously sent to the model for spam detection. When a comment is flagged as spam, it is automatically rejected and hidden from the public view. Rejected comments remain visible in the admin moderation queue for manual approval or deletion.
+
 ### With Authentication Middleware
 
 ```go
@@ -190,6 +205,20 @@ type BlogStore interface {
     GetPostByID(ctx context.Context, id string) (*Post, error)
     DeletePost(ctx context.Context, id string) error
     ListAllPosts(ctx context.Context, limit, offset int) ([]Post, error)
+
+    // Blog settings
+    GetBlogSettings(ctx context.Context) (*BlogSettings, error)
+    UpdateBlogSettings(ctx context.Context, settings *BlogSettings) error
+
+    // Comments
+    CreateComment(ctx context.Context, c *Comment) error
+    GetCommentByID(ctx context.Context, id string) (*Comment, error)
+    ListCommentsByPost(ctx context.Context, postID string) ([]Comment, error)
+    UpdateCommentContentByOwner(ctx context.Context, id, ownerTokenHash, content string) (bool, error)
+    DeleteCommentByOwner(ctx context.Context, id, ownerTokenHash string) (bool, error)
+    UpdateCommentStatus(ctx context.Context, id, status string, spamReason *string) error
+    ListCommentsForModeration(ctx context.Context, status string, limit, offset int) ([]AdminComment, error)
+    DeleteCommentByID(ctx context.Context, id string) error
 }
 ```
 
@@ -251,6 +280,30 @@ CREATE TABLE IF NOT EXISTS blog_post_tags (
     post_id TEXT NOT NULL REFERENCES blog_posts(id) ON DELETE CASCADE,
     tag_id TEXT NOT NULL REFERENCES blog_tags(id) ON DELETE CASCADE,
     PRIMARY KEY (post_id, tag_id)
+);`
+
+// SchemaBlogSettings creates the settings table
+const SchemaBlogSettings = `
+CREATE TABLE IF NOT EXISTS blog_settings (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    comments_enabled BOOLEAN NOT NULL DEFAULT TRUE,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);`
+
+// SchemaBlogComments creates the comments table
+const SchemaBlogComments = `
+CREATE TABLE IF NOT EXISTS blog_comments (
+    id TEXT PRIMARY KEY,
+    post_id TEXT NOT NULL REFERENCES blog_posts(id) ON DELETE CASCADE,
+    parent_id TEXT NULL REFERENCES blog_comments(id) ON DELETE CASCADE,
+    author_name TEXT NOT NULL,
+    content TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'approved',
+    owner_token_hash TEXT NOT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NULL,
+    spam_checked_at TIMESTAMP NULL,
+    spam_reason TEXT NULL
 );`
 ```
 
@@ -452,28 +505,27 @@ Create a custom layout template that defines a `base.html` template:
 {{define "base.html"}}
 <!doctype html>
 <html lang="en">
-<head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width,initial-scale=1">
-    <title>{{if .Post}}{{.Post.Title}} | My Site{{else}}Blog | My Site{{end}}</title>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>
+      {{if .Post}}{{.Post.Title}} | My Site{{else}}Blog | My Site{{end}}
+    </title>
     {{if .Post}}
-        <meta name="description" content="{{.Post.MetaDescription}}">
+    <meta name="description" content="{{.Post.MetaDescription}}" />
+    {{end}} {{range .CustomCSS}}
+    <link rel="stylesheet" href="{{.}}" />
     {{end}}
-    {{range .CustomCSS}}
-        <link rel="stylesheet" href="{{.}}">
-    {{end}}
-    <link rel="stylesheet" href="/static/styles.css">
-</head>
-<body>
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
     <nav>
-        <a href="/">Home</a>
-        <a href="{{.RoutePrefix}}/">Blog</a>
+      <a href="/">Home</a>
+      <a href="{{.RoutePrefix}}/">Blog</a>
     </nav>
-    <main>
-        {{block "content" .}}{{end}}
-    </main>
+    <main>{{block "content" .}}{{end}}</main>
     <footer>© 2026 My Company</footer>
-</body>
+  </body>
 </html>
 {{end}}
 ```
@@ -492,6 +544,7 @@ handler, err := blog.NewHandler(blog.Config{
 Templates receive the following data:
 
 **List Page (list.html):**
+
 ```go
 map[string]any{
     "Posts":       []Post,      // List of published posts
@@ -501,6 +554,7 @@ map[string]any{
 ```
 
 **Post Page (post.html):**
+
 ```go
 map[string]any{
     "Post":        *Post,       // The full post object
@@ -539,30 +593,31 @@ The build output in `frontend/dist` is automatically embedded when you build you
 
 ### Public Routes
 
-| Method | Path | Description |
-|--------|------|-------------|
-| GET | `<prefix>/` | List published posts (supports `?limit=N&offset=N`) |
-| GET | `<prefix>/{slug}` | View a single published post |
+| Method | Path              | Description                                         |
+| ------ | ----------------- | --------------------------------------------------- |
+| GET    | `<prefix>/`       | List published posts (supports `?limit=N&offset=N`) |
+| GET    | `<prefix>/{slug}` | View a single published post                        |
 
 ### Admin API Routes
 
 All admin routes are prefixed with `<prefix>/admin/api` and protected by your `AdminAuthMiddleware`.
 
-| Method | Path | Description |
-|--------|------|-------------|
-| GET | `/posts` | List all posts (supports `?limit=N&offset=N`) |
-| GET | `/posts/{id}` | Get a post by ID |
-| POST | `/posts` | Create a new post |
-| PUT | `/posts/{id}` | Update a post |
-| DELETE | `/posts/{id}` | Delete a post |
-| GET | `/images/enabled` | Check if image upload is enabled |
-| POST | `/images` | Upload an image (multipart form, field: `image`) |
-| GET | `/images/{id}` | Retrieve an image |
-| DELETE | `/images/{id}` | Delete an image |
+| Method | Path              | Description                                      |
+| ------ | ----------------- | ------------------------------------------------ |
+| GET    | `/posts`          | List all posts (supports `?limit=N&offset=N`)    |
+| GET    | `/posts/{id}`     | Get a post by ID                                 |
+| POST   | `/posts`          | Create a new post                                |
+| PUT    | `/posts/{id}`     | Update a post                                    |
+| DELETE | `/posts/{id}`     | Delete a post                                    |
+| GET    | `/images/enabled` | Check if image upload is enabled                 |
+| POST   | `/images`         | Upload an image (multipart form, field: `image`) |
+| GET    | `/images/{id}`    | Retrieve an image                                |
+| DELETE | `/images/{id}`    | Delete an image                                  |
 
 ### Example API Requests
 
 **Create a Post:**
+
 ```bash
 curl -X POST http://localhost:8080/blog/admin/api/posts \
   -H "Content-Type: application/json" \
@@ -576,6 +631,7 @@ curl -X POST http://localhost:8080/blog/admin/api/posts \
 ```
 
 **Publish a Post:**
+
 ```bash
 curl -X PUT http://localhost:8080/blog/admin/api/posts/{id} \
   -H "Content-Type: application/json" \
@@ -591,6 +647,7 @@ curl -X PUT http://localhost:8080/blog/admin/api/posts/{id} \
 ```
 
 **Upload an Image:**
+
 ```bash
 curl -X POST http://localhost:8080/blog/admin/api/images \
   -F "image=@photo.jpg"
@@ -693,11 +750,11 @@ func main() {
     r.Use(middleware.Recoverer)
 
     // Mount static files
-    r.Handle("/static/*", http.StripPrefix("/static/", 
+    r.Handle("/static/*", http.StripPrefix("/static/",
         http.FileServer(http.Dir("static"))))
-    
+
     // Serve uploaded images
-    r.Handle("/uploads/*", http.StripPrefix("/uploads/", 
+    r.Handle("/uploads/*", http.StripPrefix("/uploads/",
         http.FileServer(http.Dir("uploads"))))
 
     // Mount your application routes
@@ -741,7 +798,7 @@ type Session struct {
 
 Use this prompt with an LLM to integrate Spore into your existing Go project:
 
-```
+````
 I want to add the Spore blogging system to my existing Go web application. Here's what I need:
 
 PROJECT CONTEXT:
@@ -788,15 +845,17 @@ blogHandler, err := blog.NewHandler(blog.Config{
     RoutePrefix: "/blog",
 })
 r.Mount("/", blogHandler)
-```
+````
 
 For standard http.ServeMux:
+
 ```go
 blogHandler, err := blog.NewHandler(blog.Config{...})
 mux.Handle("/blog/", blogHandler)
 ```
 
 Adapt the integration to match my project's patterns and conventions.
+
 ```
 
 This prompt provides an LLM with all the context needed to successfully integrate Spore into an existing Go project. Customize the PROJECT CONTEXT section with your specific details before using it.
@@ -804,3 +863,4 @@ This prompt provides an LLM with all the context needed to successfully integrat
 ## License
 
 MIT License - see LICENSE file for details.
+```

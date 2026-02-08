@@ -33,6 +33,33 @@ export async function deletePost(id) {
   await jsonRequest(`${base}/api/posts/${id}`, { method: 'DELETE' })
 }
 
+// Blog settings API
+export async function getBlogSettings() {
+  return jsonRequest(`${base}/api/settings`)
+}
+
+export async function updateBlogSettings(data) {
+  return jsonRequest(`${base}/api/settings`, { method: 'PUT', body: JSON.stringify(data) })
+}
+
+// Comment moderation API
+export async function listComments(params = {}) {
+  const qs = new URLSearchParams(params).toString()
+  const suffix = qs ? `?${qs}` : ''
+  return jsonRequest(`${base}/api/comments${suffix}`)
+}
+
+export async function updateCommentStatus(id, status) {
+  await jsonRequest(`${base}/api/comments/${id}/status`, {
+    method: 'PUT',
+    body: JSON.stringify({ status })
+  })
+}
+
+export async function deleteComment(id) {
+  await jsonRequest(`${base}/api/comments/${id}`, { method: 'DELETE' })
+}
+
 // AI Settings API
 export async function getAISettings() {
   return jsonRequest(`${base}/api/ai/settings`)
@@ -55,17 +82,17 @@ export async function isImageUploadEnabled() {
 export async function uploadImage(file) {
   const formData = new FormData()
   formData.append('image', file)
-  
+
   const res = await fetch(`${base}/api/images`, {
     method: 'POST',
     body: formData,
   })
-  
+
   if (!res.ok) {
     const body = await res.text()
     throw new Error(`Upload failed ${res.status}: ${body}`)
   }
-  
+
   return res.json()
 }
 

@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"regexp"
 	"strings"
+	"time"
 
 	"github.com/smhanov/llmhub"
 )
@@ -232,4 +234,133 @@ func (s *service) aiPreviewConfigured(ctx context.Context) (bool, bool, error) {
 		return false, false, nil
 	}
 	return aiProviderConfigured(settings.Smart), aiProviderConfigured(settings.Dumb), nil
+}
+
+type commentSpamResult struct {
+	Spam   bool   `json:"spam"`
+	Reason string `json:"reason"`
+}
+
+var (
+	markdownCodeBlockRe = regexp.MustCompile("(?s)```.*?```")
+	markdownInlineCodeRe = regexp.MustCompile("`[^`]*`")
+	markdownImageRe      = regexp.MustCompile(`!\[([^\]]*)\]\([^\)]*\)`)
+	markdownLinkRe       = regexp.MustCompile(`\[(.*?)\]\([^\)]*\)`)
+	markdownHeaderRe     = regexp.MustCompile(`(?m)^#{1,6}\s*`)
+	markdownQuoteRe      = regexp.MustCompile(`(?m)^>\s*`)
+	markdownBulletRe     = regexp.MustCompile(`(?m)^\s*[-*+]\s+`)
+	markdownOrderedRe    = regexp.MustCompile(`(?m)^\s*\d+\.\s+`)
+	htmlTagRe            = regexp.MustCompile(`<[^>]+>`)
+)
+
+func (s *service) checkCommentSpam(ctx context.Context, comment Comment, post Post) (bool, string, error) {
+	settings, err := s.cfg.Store.GetAISettings(ctx)
+	if err != nil {
+		return false, "", err
+	}
+	if settings == nil || !aiProviderConfigured(settings.Dumb) {
+		return false, "", nil
+	}
+
+	client, err := newLLMClient(settings.Dumb, false)
+	if err != nil {
+		return false, "", err
+	}
+
+	prompt := buildCommentSpamPrompt(comment, post)
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+
+	resp, err := client.Generate(ctx, prompt)
+	if err != nil {
+		return false, "", err
+	}
+
+	spam, reason := parseCommentSpamResponse(resp.Text())
+	return spam, reason, nil
+}
+
+func buildCommentSpamPrompt(comment Comment, post Post) []*llmhub.Message {
+	excerpt := postExcerptForSpam(post)
+	system := llmhub.NewSystemMessage(llmhub.Text(
+		"You are an AI assistant who specializes in identifying spam comments on blog posts. " +
+			"Analyze the blog post and comment to determine if the comment is spam. " +
+			"Classify as either \"spam\" or \"not-spam\" using these characteristics: " +
+			"1) relevance to the post content, " +
+			"2) promotional links or content related to cryptocurrency or financial products, " +
+			"3) generic or templated phrases that could apply to any post, " +
+			"4) nonsensical or machine-generated text, " +
+			"5) excessive flattery that does not engage with the content, " +
+			"6) comments addressing the author by name might not be spam, but consider context. " +
+			"If unsure, reply \"not-spam\". Reply with only \"spam\" or \"not-spam\".",
+	))
+	user := llmhub.NewUserMessage(llmhub.Text(
+		"BLOG POST TITLE: " + post.Title + "\n" +
+			"BLOG POST EXCERPT: " + excerpt + "\n" +
+			"COMMENT TEXT: " + comment.Content,
+	))
+	return []*llmhub.Message{system, user}
+}
+
+func postExcerptForSpam(post Post) string {
+	excerpt := strings.TrimSpace(post.MetaDescription)
+	if excerpt == "" {
+		excerpt = markdownToPlainText(post.ContentMarkdown)
+	}
+	return trimToLength(excerpt, 500)
+}
+
+func trimToLength(text string, limit int) string {
+	text = strings.TrimSpace(text)
+	if text == "" || limit <= 0 {
+		return ""
+	}
+	runes := []rune(text)
+	if len(runes) <= limit {
+		return text
+	}
+	return strings.TrimSpace(string(runes[:limit])) + "..."
+}
+
+func markdownToPlainText(markdown string) string {
+	text := markdown
+	text = markdownCodeBlockRe.ReplaceAllString(text, " ")
+	text = markdownInlineCodeRe.ReplaceAllString(text, " ")
+	text = markdownImageRe.ReplaceAllString(text, "$1")
+	text = markdownLinkRe.ReplaceAllString(text, "$1")
+	text = markdownHeaderRe.ReplaceAllString(text, "")
+	text = markdownQuoteRe.ReplaceAllString(text, "")
+	text = markdownBulletRe.ReplaceAllString(text, "")
+	text = markdownOrderedRe.ReplaceAllString(text, "")
+	text = htmlTagRe.ReplaceAllString(text, " ")
+	text = strings.NewReplacer("*", " ", "_", " ", "~", " ", "|", " ").Replace(text)
+	return strings.TrimSpace(strings.Join(strings.Fields(text), " "))
+}
+
+func parseCommentSpamResponse(text string) (bool, string) {
+	trimmed := strings.TrimSpace(text)
+	if trimmed == "" {
+		return false, ""
+	}
+
+	normalized := strings.ToLower(strings.TrimSpace(trimmed))
+	if normalized == "spam" {
+		return true, ""
+	}
+	if normalized == "not-spam" || normalized == "not spam" {
+		return false, ""
+	}
+
+	var payload commentSpamResult
+	if json.Unmarshal([]byte(trimmed), &payload) == nil {
+		return payload.Spam, strings.TrimSpace(payload.Reason)
+	}
+
+	if obj, ok := extractJSONObject(trimmed); ok {
+		if json.Unmarshal([]byte(obj), &payload) == nil {
+			return payload.Spam, strings.TrimSpace(payload.Reason)
+		}
+	}
+
+	return false, ""
 }

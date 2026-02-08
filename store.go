@@ -44,4 +44,18 @@ type BlogStore interface {
 	// AI settings
 	GetAISettings(ctx context.Context) (*AISettings, error)
 	UpdateAISettings(ctx context.Context, settings *AISettings) error
+
+	// Blog settings
+	GetBlogSettings(ctx context.Context) (*BlogSettings, error)
+	UpdateBlogSettings(ctx context.Context, settings *BlogSettings) error
+
+	// Comments
+	CreateComment(ctx context.Context, c *Comment) error
+	GetCommentByID(ctx context.Context, id string) (*Comment, error)
+	ListCommentsByPost(ctx context.Context, postID string) ([]Comment, error)
+	UpdateCommentContentByOwner(ctx context.Context, id, ownerTokenHash, content string) (bool, error)
+	DeleteCommentByOwner(ctx context.Context, id, ownerTokenHash string) (bool, error)
+	UpdateCommentStatus(ctx context.Context, id, status string, spamReason *string) error
+	ListCommentsForModeration(ctx context.Context, status string, limit, offset int) ([]AdminComment, error)
+	DeleteCommentByID(ctx context.Context, id string) error
 }

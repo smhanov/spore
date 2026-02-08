@@ -1,11 +1,524 @@
 {{define "content"}}
-  <article class="card">
-    <h1>{{.Post.Title}}</h1>
-    {{if .Post.PublishedAt}}<p style="color:#6b7280;">Published {{.Post.PublishedAt.Format "Jan 2, 2006"}}</p>{{end}}
-    <div>{{safeHTML .Post.ContentHTML}}</div>
-  </article>
-{{end}}
+<article class="card">
+  <h1>{{.Post.Title}}</h1>
+  {{if .Post.PublishedAt}}
+  <p style="color: #6b7280">
+    Published {{.Post.PublishedAt.Format "Jan 2, 2006"}}
+  </p>
+  {{end}}
+  <div>{{safeHTML .Post.ContentHTML}}</div>
+</article>
 
-{{define "post.html"}}
-  {{template "base.html" .}}
-{{end}}
+<section class="comment-shell">
+  {{if .CommentsEnabled}}
+  <div class="comment-header">
+    <div>
+      <h2>Comments</h2>
+      <p>Join the discussion with a quick note or a reply.</p>
+    </div>
+  </div>
+
+  <div
+    class="comment-panel"
+    data-comments
+    data-post-slug="{{.Post.Slug}}"
+    data-base="{{.RoutePrefix}}"
+  >
+    <form class="comment-form">
+      <div class="comment-row">
+        <input
+          class="comment-input"
+          name="author_name"
+          placeholder="Your name"
+          maxlength="60"
+          required
+        />
+        <span class="comment-badge" data-reply-badge hidden></span>
+      </div>
+      <textarea
+        class="comment-textarea"
+        name="content"
+        rows="4"
+        maxlength="2000"
+        placeholder="Share something thoughtful..."
+        required
+      ></textarea>
+      <div class="comment-actions">
+        <button type="button" class="comment-cancel" hidden>Cancel</button>
+        <button type="submit" class="comment-submit">Post comment</button>
+      </div>
+      <p class="comment-hint">
+        Tip: use @name to mention someone. Replies stay one level deep.
+      </p>
+    </form>
+
+    <div class="comment-list" aria-live="polite"></div>
+  </div>
+  {{else}}
+  <div class="comment-disabled">
+    <h2>Comments are turned off</h2>
+    <p>The administrator has disabled comments for now.</p>
+  </div>
+  {{end}}
+</section>
+
+<style>
+  .comment-shell {
+    margin: 28px 0 64px;
+  }
+  .comment-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 16px;
+  }
+  .comment-header h2 {
+    margin: 0 0 6px;
+    font-size: 22px;
+  }
+  .comment-header p {
+    margin: 0;
+    color: #6b7280;
+    font-size: 14px;
+  }
+  .comment-panel {
+    background: #ffffff;
+    border-radius: 14px;
+    padding: 18px;
+    box-shadow: 0 12px 30px rgba(15, 23, 42, 0.08);
+    border: 1px solid #e5e7eb;
+  }
+  .comment-form {
+    display: grid;
+    gap: 12px;
+    margin-bottom: 20px;
+  }
+  .comment-row {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    flex-wrap: wrap;
+  }
+  .comment-input {
+    flex: 1;
+    min-width: 180px;
+    padding: 10px 12px;
+    border-radius: 10px;
+    border: 1px solid #e5e7eb;
+    font-size: 14px;
+  }
+  .comment-textarea {
+    width: 100%;
+    padding: 12px;
+    border-radius: 12px;
+    border: 1px solid #e5e7eb;
+    font-size: 14px;
+    resize: vertical;
+    min-height: 110px;
+  }
+  .comment-actions {
+    display: flex;
+    gap: 10px;
+    justify-content: flex-end;
+  }
+  .comment-submit {
+    background: #0f172a;
+    color: #fff;
+    border: none;
+    padding: 10px 16px;
+    border-radius: 999px;
+    cursor: pointer;
+    font-weight: 600;
+  }
+  .comment-cancel {
+    background: #f3f4f6;
+    color: #374151;
+    border: none;
+    padding: 10px 16px;
+    border-radius: 999px;
+    cursor: pointer;
+  }
+  .comment-badge {
+    background: #e0f2fe;
+    color: #075985;
+    padding: 4px 10px;
+    border-radius: 999px;
+    font-size: 12px;
+    font-weight: 600;
+  }
+  .comment-hint {
+    margin: 0;
+    color: #9ca3af;
+    font-size: 12px;
+  }
+  .comment-list {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+  }
+  .comment-item {
+    border: 1px solid #eef2f7;
+    border-radius: 12px;
+    padding: 14px;
+    background: #f8fafc;
+  }
+  .comment-item.pending {
+    border-style: dashed;
+    opacity: 0.8;
+  }
+  .comment-meta {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+  .comment-author {
+    font-weight: 700;
+    color: #0f172a;
+  }
+  .comment-time {
+    color: #94a3b8;
+    font-size: 12px;
+  }
+  .comment-status {
+    font-size: 11px;
+    color: #0f766e;
+    background: #ccfbf1;
+    padding: 2px 8px;
+    border-radius: 999px;
+  }
+  .comment-body {
+    margin: 10px 0 12px;
+    color: #1f2937;
+    line-height: 1.6;
+  }
+  .comment-actions-row {
+    display: flex;
+    gap: 10px;
+  }
+  .comment-link {
+    background: none;
+    border: none;
+    color: #2563eb;
+    cursor: pointer;
+    font-size: 13px;
+    padding: 0;
+  }
+  .comment-link.danger {
+    color: #dc2626;
+  }
+  .comment-replies {
+    margin-top: 12px;
+    padding-left: 16px;
+    border-left: 2px solid #e5e7eb;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+  .comment-disabled {
+    background: #ffffff;
+    border: 1px dashed #e5e7eb;
+    padding: 18px;
+    border-radius: 12px;
+    color: #6b7280;
+  }
+  .mention {
+    color: #0f766e;
+    font-weight: 600;
+  }
+  @media (max-width: 640px) {
+    .comment-actions {
+      justify-content: flex-start;
+    }
+    .comment-panel {
+      padding: 16px;
+    }
+  }
+</style>
+
+{{if .CommentsEnabled}}
+<script>
+  (function () {
+    const root = document.querySelector("[data-comments]");
+    if (!root) return;
+
+    const postSlug = root.dataset.postSlug;
+    const base = root.dataset.base || "";
+    const listEl = root.querySelector(".comment-list");
+    const form = root.querySelector(".comment-form");
+    const nameInput = form.querySelector('input[name="author_name"]');
+    const contentInput = form.querySelector('textarea[name="content"]');
+    const submitButton = form.querySelector(".comment-submit");
+    const cancelButton = form.querySelector(".comment-cancel");
+    const replyBadge = form.querySelector("[data-reply-badge]");
+
+    let editingId = null;
+    let replyToId = null;
+    let replyToName = "";
+    let commentIndex = {};
+
+    function escapeHTML(text) {
+      return text.replace(/[&<>"']/g, function (ch) {
+        switch (ch) {
+          case "&":
+            return "&amp;";
+          case "<":
+            return "&lt;";
+          case ">":
+            return "&gt;";
+          case '"':
+            return "&quot;";
+          case "'":
+            return "&#39;";
+          default:
+            return ch;
+        }
+      });
+    }
+
+    function renderMentions(text) {
+      const escaped = escapeHTML(text);
+      return escaped.replace(
+        /(^|\s)@([a-zA-Z0-9_-]{1,30})/g,
+        '$1<span class="mention">@$2</span>',
+      );
+    }
+
+    function formatTime(dateStr) {
+      if (!dateStr) return "";
+      const date = new Date(dateStr);
+      return date.toLocaleDateString("en-US", {
+        month: "short",
+        day: "numeric",
+        year: "numeric",
+      });
+    }
+
+    function setReplyBadge() {
+      if (replyToId && replyToName) {
+        replyBadge.textContent = "Replying to " + replyToName;
+        replyBadge.hidden = false;
+      } else {
+        replyBadge.hidden = true;
+        replyBadge.textContent = "";
+      }
+    }
+
+    function resetForm() {
+      editingId = null;
+      replyToId = null;
+      replyToName = "";
+      contentInput.value = "";
+      submitButton.textContent = "Post comment";
+      cancelButton.hidden = true;
+      setReplyBadge();
+    }
+
+    function renderComments(comments) {
+      commentIndex = {};
+      const html = comments.map(renderComment).join("");
+      listEl.innerHTML =
+        html ||
+        '<div class="comment-item">No comments yet. Be the first to share.</div>';
+    }
+
+    function renderComment(comment) {
+      commentIndex[comment.id] = comment;
+      const status =
+        comment.status === "pending"
+          ? '<span class="comment-status">Pending review</span>'
+          : "";
+      const replies =
+        comment.replies && comment.replies.length
+          ? '<div class="comment-replies">' +
+            comment.replies.map(renderReply).join("") +
+            "</div>"
+          : "";
+      const ownedActions = comment.owned
+        ? '<button class="comment-link" data-action="edit" data-id="' +
+          comment.id +
+          '">Edit</button>' +
+          '<button class="comment-link danger" data-action="delete" data-id="' +
+          comment.id +
+          '">Delete</button>'
+        : "";
+      const replyAction =
+        comment.status === "approved"
+          ? '<button class="comment-link" data-action="reply" data-id="' +
+            comment.id +
+            '">Reply</button>'
+          : "";
+      const itemClass =
+        comment.status === "pending" ? "comment-item pending" : "comment-item";
+
+      return (
+        '<div class="' +
+        itemClass +
+        '" data-id="' +
+        comment.id +
+        '">' +
+        '<div class="comment-meta">' +
+        '<span class="comment-author">' +
+        escapeHTML(comment.author_name) +
+        "</span>" +
+        '<span class="comment-time">' +
+        formatTime(comment.created_at) +
+        "</span>" +
+        status +
+        "</div>" +
+        '<div class="comment-body">' +
+        renderMentions(comment.content) +
+        "</div>" +
+        '<div class="comment-actions-row">' +
+        replyAction +
+        ownedActions +
+        "</div>" +
+        replies +
+        "</div>"
+      );
+    }
+
+    function renderReply(reply) {
+      commentIndex[reply.id] = reply;
+      const status =
+        reply.status === "pending"
+          ? '<span class="comment-status">Pending review</span>'
+          : "";
+      const ownedActions = reply.owned
+        ? '<button class="comment-link" data-action="edit" data-id="' +
+          reply.id +
+          '">Edit</button>' +
+          '<button class="comment-link danger" data-action="delete" data-id="' +
+          reply.id +
+          '">Delete</button>'
+        : "";
+      const itemClass =
+        reply.status === "pending" ? "comment-item pending" : "comment-item";
+
+      return (
+        '<div class="' +
+        itemClass +
+        '" data-id="' +
+        reply.id +
+        '">' +
+        '<div class="comment-meta">' +
+        '<span class="comment-author">' +
+        escapeHTML(reply.author_name) +
+        "</span>" +
+        '<span class="comment-time">' +
+        formatTime(reply.created_at) +
+        "</span>" +
+        status +
+        "</div>" +
+        '<div class="comment-body">' +
+        renderMentions(reply.content) +
+        "</div>" +
+        '<div class="comment-actions-row">' +
+        ownedActions +
+        "</div>" +
+        "</div>"
+      );
+    }
+
+    async function loadComments() {
+      const res = await fetch(base + "/" + postSlug + "/comments");
+      if (!res.ok) {
+        listEl.innerHTML =
+          '<div class="comment-item">Unable to load comments.</div>';
+        return;
+      }
+      const data = await res.json();
+      renderComments(data || []);
+    }
+
+    async function submitComment() {
+      const payload = {
+        author_name: nameInput.value.trim(),
+        content: contentInput.value.trim(),
+      };
+      if (replyToId) {
+        payload.parent_id = replyToId;
+      }
+
+      if (editingId) {
+        const res = await fetch(base + "/comments/" + editingId, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ content: payload.content }),
+        });
+        if (!res.ok) {
+          alert("Unable to update comment.");
+          return;
+        }
+        await loadComments();
+        resetForm();
+        return;
+      }
+
+      const res = await fetch(base + "/" + postSlug + "/comments", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      if (!res.ok) {
+        const message = await res.text();
+        alert(message || "Unable to post comment.");
+        return;
+      }
+      await loadComments();
+      resetForm();
+    }
+
+    listEl.addEventListener("click", async function (event) {
+      const btn = event.target.closest("button[data-action]");
+      if (!btn) return;
+      const action = btn.getAttribute("data-action");
+      const id = btn.getAttribute("data-id");
+      const comment = commentIndex[id];
+      if (!comment) return;
+
+      if (action === "reply") {
+        replyToId = comment.id;
+        replyToName = comment.author_name;
+        setReplyBadge();
+        contentInput.focus();
+        if (!contentInput.value.trim()) {
+          contentInput.value = "@" + comment.author_name + " ";
+        }
+        return;
+      }
+
+      if (action === "edit") {
+        editingId = comment.id;
+        contentInput.value = comment.content;
+        submitButton.textContent = "Save changes";
+        cancelButton.hidden = false;
+        contentInput.focus();
+        return;
+      }
+
+      if (action === "delete") {
+        if (!confirm("Delete this comment?")) return;
+        const res = await fetch(base + "/comments/" + id, { method: "DELETE" });
+        if (!res.ok) {
+          alert("Unable to delete comment.");
+          return;
+        }
+        await loadComments();
+        return;
+      }
+    });
+
+    cancelButton.addEventListener("click", function () {
+      resetForm();
+    });
+
+    form.addEventListener("submit", function (event) {
+      event.preventDefault();
+      submitComment();
+    });
+
+    loadComments();
+  })();
+</script>
+{{end}} {{end}} {{define "post.html"}} {{template "base.html" .}} {{end}}

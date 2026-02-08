@@ -37,3 +37,30 @@ type AISettings struct {
 	Smart AIProviderSettings `json:"smart"`
 	Dumb  AIProviderSettings `json:"dumb"`
 }
+
+// BlogSettings stores runtime configuration for the blog.
+type BlogSettings struct {
+	CommentsEnabled bool `json:"comments_enabled" db:"comments_enabled"`
+}
+
+// Comment represents a public comment on a blog post.
+type Comment struct {
+	ID             string     `json:"id" db:"id"`
+	PostID         string     `json:"post_id" db:"post_id"`
+	ParentID       *string    `json:"parent_id,omitempty" db:"parent_id"`
+	AuthorName     string     `json:"author_name" db:"author_name"`
+	Content        string     `json:"content" db:"content"`
+	Status         string     `json:"status" db:"status"`
+	OwnerTokenHash string     `json:"-" db:"owner_token_hash"`
+	CreatedAt      time.Time  `json:"created_at" db:"created_at"`
+	UpdatedAt      *time.Time `json:"updated_at,omitempty" db:"updated_at"`
+	SpamCheckedAt  *time.Time `json:"spam_checked_at,omitempty" db:"spam_checked_at"`
+	SpamReason     *string    `json:"spam_reason,omitempty" db:"spam_reason"`
+}
+
+// AdminComment adds post metadata for moderation views.
+type AdminComment struct {
+	Comment
+	PostTitle string `json:"post_title" db:"post_title"`
+	PostSlug  string `json:"post_slug" db:"post_slug"`
+}

@@ -20,6 +20,13 @@ func (s *service) mountAdminRoutes(r chi.Router) {
 		r.Put("/posts/{id}", s.handleAdminUpdatePost)
 		r.Delete("/posts/{id}", s.handleAdminDeletePost)
 
+		r.Get("/settings", s.handleAdminGetBlogSettings)
+		r.Put("/settings", s.handleAdminUpdateBlogSettings)
+
+		r.Get("/comments", s.handleAdminListComments)
+		r.Put("/comments/{id}/status", s.handleAdminUpdateCommentStatus)
+		r.Delete("/comments/{id}", s.handleAdminDeleteComment)
+
 		r.Get("/ai/settings", s.handleAdminGetAISettings)
 		r.Put("/ai/settings", s.handleAdminUpdateAISettings)
 		r.Post("/ai/chat", s.handleAdminAIChat)

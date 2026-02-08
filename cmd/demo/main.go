@@ -16,9 +16,11 @@ import (
 )
 
 type memoryStore struct {
-	mu    sync.RWMutex
-	posts map[string]blog.Post // keyed by ID
-	ai    *blog.AISettings
+	mu       sync.RWMutex
+	posts    map[string]blog.Post // keyed by ID
+	ai       *blog.AISettings
+	settings *blog.BlogSettings
+	comments map[string]blog.Comment
 }
 
 func (m *memoryStore) Migrate(ctx context.Context) error {
@@ -26,7 +28,7 @@ func (m *memoryStore) Migrate(ctx context.Context) error {
 }
 
 func newMemoryStore() *memoryStore {
-	return &memoryStore{posts: map[string]blog.Post{}}
+	return &memoryStore{posts: map[string]blog.Post{}, comments: map[string]blog.Comment{}}
 }
 
 func (m *memoryStore) seed() {
@@ -172,6 +174,159 @@ func (m *memoryStore) UpdateAISettings(ctx context.Context, settings *blog.AISet
 	}
 	copy := *settings
 	m.ai = &copy
+	return nil
+}
+
+func (m *memoryStore) GetBlogSettings(ctx context.Context) (*blog.BlogSettings, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if m.settings == nil {
+		return &blog.BlogSettings{CommentsEnabled: true}, nil
+	}
+	copy := *m.settings
+	return &copy, nil
+}
+
+func (m *memoryStore) UpdateBlogSettings(ctx context.Context, settings *blog.BlogSettings) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if settings == nil {
+		m.settings = nil
+		return nil
+	}
+	copy := *settings
+	m.settings = &copy
+	return nil
+}
+
+func (m *memoryStore) CreateComment(ctx context.Context, c *blog.Comment) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if c.ID == "" {
+		c.ID = fmt.Sprintf("c%d", len(m.comments)+1)
+	}
+	if c.CreatedAt.IsZero() {
+		c.CreatedAt = time.Now().UTC()
+	}
+	if c.Status == "" {
+		c.Status = "approved"
+	}
+	m.comments[c.ID] = *c
+	return nil
+}
+
+func (m *memoryStore) GetCommentByID(ctx context.Context, id string) (*blog.Comment, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	c, ok := m.comments[id]
+	if !ok {
+		return nil, nil
+	}
+	copy := c
+	return &copy, nil
+}
+
+func (m *memoryStore) ListCommentsByPost(ctx context.Context, postID string) ([]blog.Comment, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	var out []blog.Comment
+	for _, c := range m.comments {
+		if c.PostID == postID {
+			out = append(out, c)
+		}
+	}
+	for i := 0; i < len(out); i++ {
+		for j := i + 1; j < len(out); j++ {
+			if out[j].CreatedAt.Before(out[i].CreatedAt) {
+				out[i], out[j] = out[j], out[i]
+			}
+		}
+	}
+	return out, nil
+}
+
+func (m *memoryStore) UpdateCommentContentByOwner(ctx context.Context, id, ownerTokenHash, content string) (bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	c, ok := m.comments[id]
+	if !ok || c.OwnerTokenHash != ownerTokenHash || c.Status == "rejected" {
+		return false, nil
+	}
+	c.Content = content
+	now := time.Now().UTC()
+	c.UpdatedAt = &now
+	m.comments[id] = c
+	return true, nil
+}
+
+func (m *memoryStore) DeleteCommentByOwner(ctx context.Context, id, ownerTokenHash string) (bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	c, ok := m.comments[id]
+	if !ok || c.OwnerTokenHash != ownerTokenHash {
+		return false, nil
+	}
+	delete(m.comments, id)
+	return true, nil
+}
+
+func (m *memoryStore) UpdateCommentStatus(ctx context.Context, id, status string, spamReason *string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	c, ok := m.comments[id]
+	if !ok {
+		return nil
+	}
+	c.Status = status
+	if spamReason != nil {
+		reason := *spamReason
+		c.SpamReason = &reason
+	}
+	now := time.Now().UTC()
+	c.UpdatedAt = &now
+	if status == "approved" || status == "rejected" {
+		c.SpamCheckedAt = &now
+	}
+	m.comments[id] = c
+	return nil
+}
+
+func (m *memoryStore) ListCommentsForModeration(ctx context.Context, status string, limit, offset int) ([]blog.AdminComment, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	var out []blog.AdminComment
+	for _, c := range m.comments {
+		if status != "" && c.Status != status {
+			continue
+		}
+		post := m.posts[c.PostID]
+		out = append(out, blog.AdminComment{
+			Comment:   c,
+			PostTitle: post.Title,
+			PostSlug:  post.Slug,
+		})
+	}
+	for i := 0; i < len(out); i++ {
+		for j := i + 1; j < len(out); j++ {
+			if out[j].CreatedAt.After(out[i].CreatedAt) {
+				out[i], out[j] = out[j], out[i]
+			}
+		}
+	}
+	if offset >= len(out) {
+		return []blog.AdminComment{}, nil
+	}
+	end := offset + limit
+	if end > len(out) {
+		end = len(out)
+	}
+	return out[offset:end], nil
+}
+
+func (m *memoryStore) DeleteCommentByID(ctx context.Context, id string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	delete(m.comments, id)
 	return nil
 }
 

@@ -10,6 +10,7 @@ import (
 func (s *service) mountPublicRoutes(r chi.Router) {
 	r.Get("/", s.handleListPosts)
 	r.Get("/{slug}", s.handleViewPost)
+	s.mountCommentRoutes(r)
 }
 
 func (s *service) handleListPosts(w http.ResponseWriter, r *http.Request) {
@@ -53,10 +54,16 @@ func (s *service) handleViewPost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	commentsEnabled := true
+	if settings, err := s.cfg.Store.GetBlogSettings(r.Context()); err == nil && settings != nil {
+		commentsEnabled = settings.CommentsEnabled
+	}
+
 	data := map[string]any{
-		"Post":        post,
-		"RoutePrefix": s.routePrefix,
-		"CustomCSS":   s.cfg.CustomCSSURLs,
+		"Post":            post,
+		"RoutePrefix":     s.routePrefix,
+		"CustomCSS":       s.cfg.CustomCSSURLs,
+		"CommentsEnabled": commentsEnabled,
 	}
 
 	s.executeTemplate(w, "post.html", data)

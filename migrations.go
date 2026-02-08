@@ -24,4 +24,12 @@ var migrations = []migration{
 			SchemaBlogAISettings,
 		},
 	},
+	{
+		Version: 3,
+		Name:    "create comments and settings tables",
+		Statements: []string{
+			SchemaBlogSettings,
+			SchemaBlogComments,
+		},
+	},
 }

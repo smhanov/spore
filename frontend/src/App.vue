@@ -50,6 +50,13 @@
             <i :class="['ph text-lg', currentView === 'ai-settings' ? 'ph-brain-fill' : 'ph-brain']"></i>
             AI Settings
           </a>
+
+          <a href="#" @click.prevent="currentView = 'comments'; sidebarOpen = false" 
+             :class="['flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all duration-200 group', 
+             currentView === 'comments' ? 'bg-brand-50 text-brand-700 shadow-sm ring-1 ring-brand-100' : 'text-slate-600 hover:bg-white hover:shadow-sm']">
+            <i :class="['ph text-lg', currentView === 'comments' ? 'ph-chat-circle-dots-fill' : 'ph-chat-circle-dots']"></i>
+            Comments
+          </a>
         </nav>
 
         <div class="p-4 border-t border-slate-200/60">
@@ -344,6 +351,8 @@
                   </span>
                 </div>
 
+                <p class="text-xs text-slate-500">Used to write or edit posts.</p>
+
                 <div class="space-y-2">
                   <label class="text-xs font-semibold text-slate-500 uppercase">Provider</label>
                   <select v-model="aiSettings.smart.provider" class="w-full text-sm p-2.5 border border-slate-200 rounded-lg focus:border-brand-500 focus:ring-1 focus:ring-brand-500 outline-none">
@@ -391,7 +400,7 @@
                 </div>
 
                 <div class="flex items-center justify-between gap-3">
-                  <p class="text-xs text-slate-500">Use for quick rewrites or simple edits.</p>
+                  <p class="text-xs text-slate-500">Used for spam detection, quick rewrites, and simple edits.</p>
                   <button @click="copySmartToDumb" class="text-xs font-semibold text-brand-600 hover:text-brand-700">Copy smart → dumb</button>
                 </div>
 
@@ -440,6 +449,83 @@
           </div>
         </div>
 
+        <!-- VIEW: COMMENTS -->
+        <div v-else-if="currentView === 'comments'" class="h-full flex flex-col overflow-y-auto">
+          <div class="p-4 md:p-8 pb-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div>
+              <h2 class="text-2xl font-bold text-slate-900">Comments</h2>
+              <p class="text-slate-500 text-sm mt-1">Moderate discussions and control comment availability</p>
+            </div>
+            <button @click="saveBlogSettings" :disabled="blogSettingsSaving" 
+              :class="['text-white px-5 py-2.5 rounded-xl text-sm font-medium shadow-lg transition-all active:scale-95 flex items-center gap-2', blogSettingsSaving ? 'bg-slate-500 cursor-not-allowed' : 'bg-slate-900 hover:bg-slate-800']">
+              <i v-if="blogSettingsSaving" class="ph ph-spinner animate-spin"></i>
+              {{ blogSettingsSaving ? 'Saving...' : 'Save Settings' }}
+            </button>
+          </div>
+
+          <div class="px-4 md:px-8 pb-8 space-y-6">
+            <div class="bg-white border border-slate-200/60 rounded-2xl p-5 shadow-sm">
+              <div class="flex items-center justify-between gap-4">
+                <div>
+                  <h3 class="text-lg font-bold text-slate-900">Allow comments</h3>
+                  <p class="text-sm text-slate-500 mt-1">Turn this off to hide comment forms and disable posting.</p>
+                </div>
+                <button @click="blogSettings.comments_enabled = !blogSettings.comments_enabled" 
+                    :class="['w-12 h-6 rounded-full relative transition-colors duration-300 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-brand-500', blogSettings.comments_enabled ? 'bg-emerald-500' : 'bg-slate-300']">
+                  <span :class="['absolute top-1 left-1 w-4 h-4 bg-white rounded-full shadow-sm transition-transform duration-300', blogSettings.comments_enabled ? 'translate-x-6' : 'translate-x-0']"></span>
+                </button>
+              </div>
+            </div>
+
+            <div class="bg-white border border-slate-200/60 rounded-2xl p-5 shadow-sm space-y-4">
+              <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+                <div>
+                  <h3 class="text-lg font-bold text-slate-900">Moderation Queue</h3>
+                  <p class="text-sm text-slate-500">Review recent comments and spam checks.</p>
+                </div>
+                <div class="flex flex-wrap gap-2">
+                  <button v-for="opt in commentFilters" :key="opt.key" @click="commentFilter = opt.key" 
+                    :class="['px-4 py-2 rounded-xl text-xs font-semibold border transition-all', commentFilter === opt.key ? 'bg-slate-900 text-white border-slate-900' : 'border-slate-200 text-slate-500 hover:text-slate-700']">
+                    {{ opt.label }}
+                  </button>
+                </div>
+              </div>
+
+              <div v-if="commentLoading" class="flex items-center gap-2 text-slate-500">
+                <i class="ph ph-spinner animate-spin"></i>
+                Loading comments...
+              </div>
+
+              <div v-else-if="moderationComments.length === 0" class="text-sm text-slate-500">No comments to show.</div>
+
+              <div v-else class="space-y-3">
+                <div v-for="comment in moderationComments" :key="comment.id" class="border border-slate-200/60 rounded-2xl p-4 bg-slate-50/60">
+                  <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-2">
+                    <div>
+                      <p class="text-sm font-semibold text-slate-900">{{ comment.author_name }} <span class="text-xs text-slate-400">on</span> {{ comment.post_title }}</p>
+                      <p class="text-xs text-slate-500">/{{ comment.post_slug }} · {{ formatDate(comment.created_at) }}</p>
+                    </div>
+                    <span class="text-xs font-semibold px-2 py-1 rounded-full"
+                      :class="commentStatusClass(comment.status)">
+                      {{ comment.status }}
+                    </span>
+                  </div>
+
+                  <p class="text-sm text-slate-700 mt-3 whitespace-pre-wrap">{{ comment.content }}</p>
+                  <p v-if="comment.spam_reason" class="text-xs text-rose-600 mt-2">Spam note: {{ comment.spam_reason }}</p>
+
+                  <div class="flex flex-wrap gap-2 mt-4">
+                    <button v-if="comment.status !== 'approved'" @click="setModerationStatus(comment, 'approved')" class="px-3 py-1.5 rounded-lg text-xs font-semibold bg-emerald-500 text-white">Approve</button>
+                    <button v-if="comment.status !== 'hidden'" @click="setModerationStatus(comment, 'hidden')" class="px-3 py-1.5 rounded-lg text-xs font-semibold bg-slate-200 text-slate-700">Hide</button>
+                    <button v-if="comment.status !== 'rejected'" @click="setModerationStatus(comment, 'rejected')" class="px-3 py-1.5 rounded-lg text-xs font-semibold bg-amber-500 text-white">Reject</button>
+                    <button @click="removeModerationComment(comment)" class="px-3 py-1.5 rounded-lg text-xs font-semibold bg-rose-500 text-white">Delete</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
       </main>
     </div>
   </div>
@@ -449,7 +535,7 @@
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
-import { listPosts, createPost, updatePost, deletePost, getAISettings, updateAISettings, sendAIChat } from './api'
+import { listPosts, createPost, updatePost, deletePost, getAISettings, updateAISettings, sendAIChat, getBlogSettings, updateBlogSettings, listComments, updateCommentStatus, deleteComment } from './api'
 import MarkdownEditor from './components/MarkdownEditor.vue'
 
 // --- State ---
@@ -473,6 +559,19 @@ const aiNotes = ref('')
 const aiUseSearch = ref(false)
 const aiHighlightEnabled = ref(true)
 const aiHighlight = ref(null)
+const blogSettings = ref({ comments_enabled: true })
+const blogSettingsLoading = ref(false)
+const blogSettingsSaving = ref(false)
+const moderationComments = ref([])
+const commentLoading = ref(false)
+const commentFilter = ref('pending')
+const commentFilters = [
+  { key: 'pending', label: 'Pending' },
+  { key: 'rejected', label: 'Rejected' },
+  { key: 'approved', label: 'Approved' },
+  { key: 'hidden', label: 'Hidden' },
+  { key: 'all', label: 'All' }
+]
 
 // Toast state
 const toast = ref({
@@ -580,6 +679,79 @@ async function saveAISettings() {
     showToast('Failed to save AI settings: ' + err.message, 'error')
   } finally {
     aiSaving.value = false
+  }
+}
+
+async function loadBlogSettings() {
+  blogSettingsLoading.value = true
+  try {
+    const result = await getBlogSettings()
+    blogSettings.value = result || { comments_enabled: true }
+  } catch (err) {
+    showToast('Failed to load blog settings: ' + err.message, 'error')
+  } finally {
+    blogSettingsLoading.value = false
+  }
+}
+
+async function saveBlogSettings() {
+  blogSettingsSaving.value = true
+  try {
+    const result = await updateBlogSettings({ comments_enabled: !!blogSettings.value.comments_enabled })
+    blogSettings.value = result || blogSettings.value
+    showToast('Blog settings saved')
+  } catch (err) {
+    showToast('Failed to save blog settings: ' + err.message, 'error')
+  } finally {
+    blogSettingsSaving.value = false
+  }
+}
+
+async function loadModerationComments() {
+  commentLoading.value = true
+  try {
+    const status = commentFilter.value === 'all' ? '' : commentFilter.value
+    moderationComments.value = await listComments(status ? { status } : {})
+  } catch (err) {
+    showToast('Failed to load comments: ' + err.message, 'error')
+  } finally {
+    commentLoading.value = false
+  }
+}
+
+function commentStatusClass(status) {
+  switch (status) {
+    case 'approved':
+      return 'bg-emerald-50 text-emerald-700'
+    case 'pending':
+      return 'bg-amber-50 text-amber-700'
+    case 'rejected':
+      return 'bg-rose-50 text-rose-700'
+    case 'hidden':
+      return 'bg-slate-100 text-slate-600'
+    default:
+      return 'bg-slate-100 text-slate-600'
+  }
+}
+
+async function setModerationStatus(comment, status) {
+  try {
+    await updateCommentStatus(comment.id, status)
+    await loadModerationComments()
+    showToast('Comment updated')
+  } catch (err) {
+    showToast('Failed to update comment: ' + err.message, 'error')
+  }
+}
+
+async function removeModerationComment(comment) {
+  if (!confirm('Delete this comment?')) return
+  try {
+    await deleteComment(comment.id)
+    await loadModerationComments()
+    showToast('Comment deleted')
+  } catch (err) {
+    showToast('Failed to delete comment: ' + err.message, 'error')
   }
 }
 
@@ -799,6 +971,19 @@ onMounted(() => {
   // Load posts
   loadPosts()
   loadAISettings()
+})
+
+watch(commentFilter, () => {
+  if (currentView.value === 'comments') {
+    loadModerationComments()
+  }
+})
+
+watch(currentView, (nextView) => {
+  if (nextView === 'comments') {
+    loadBlogSettings()
+    loadModerationComments()
+  }
 })
 
 watch(draftPost, (newVal) => {

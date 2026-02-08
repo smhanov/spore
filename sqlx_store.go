@@ -56,6 +56,31 @@ CREATE TABLE IF NOT EXISTS blog_ai_settings (
 	updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 `
+	SchemaBlogSettings = `
+CREATE TABLE IF NOT EXISTS blog_settings (
+	id INTEGER PRIMARY KEY CHECK (id = 1),
+	comments_enabled BOOLEAN NOT NULL DEFAULT TRUE,
+	updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+`
+	SchemaBlogComments = `
+CREATE TABLE IF NOT EXISTS blog_comments (
+	id TEXT PRIMARY KEY,
+	post_id TEXT NOT NULL REFERENCES blog_posts(id) ON DELETE CASCADE,
+	parent_id TEXT NULL REFERENCES blog_comments(id) ON DELETE CASCADE,
+	author_name TEXT NOT NULL,
+	content TEXT NOT NULL,
+	status TEXT NOT NULL DEFAULT 'approved',
+	owner_token_hash TEXT NOT NULL,
+	created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+	updated_at TIMESTAMP NULL,
+	spam_checked_at TIMESTAMP NULL,
+	spam_reason TEXT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_blog_comments_post_id ON blog_comments(post_id);
+CREATE INDEX IF NOT EXISTS idx_blog_comments_status ON blog_comments(status);
+CREATE INDEX IF NOT EXISTS idx_blog_comments_parent_id ON blog_comments(parent_id);
+`
 )
 
 // SQLXStore is a reference implementation of BlogStore using sqlx.
@@ -301,5 +326,142 @@ INSERT INTO blog_ai_settings (
 		settings.Dumb.Temperature,
 		settings.Dumb.MaxTokens,
 	)
+	return err
+}
+
+func (s *SQLXStore) GetBlogSettings(ctx context.Context) (*BlogSettings, error) {
+	var settings BlogSettings
+	err := s.DB.GetContext(ctx, &settings, `SELECT comments_enabled FROM blog_settings WHERE id = 1`)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &settings, nil
+}
+
+func (s *SQLXStore) UpdateBlogSettings(ctx context.Context, settings *BlogSettings) error {
+	if settings == nil {
+		return fmt.Errorf("blog settings required")
+	}
+	_, err := s.DB.ExecContext(ctx, `
+INSERT INTO blog_settings (id, comments_enabled)
+VALUES (1, $1)
+ON CONFLICT(id) DO UPDATE SET
+    comments_enabled = excluded.comments_enabled,
+    updated_at = CURRENT_TIMESTAMP
+`, settings.CommentsEnabled)
+	return err
+}
+
+func (s *SQLXStore) CreateComment(ctx context.Context, c *Comment) error {
+	if c == nil {
+		return fmt.Errorf("comment required")
+	}
+	if c.ID == "" {
+		c.ID = generateID()
+	}
+	if c.Status == "" {
+		c.Status = "approved"
+	}
+	_, err := s.DB.ExecContext(ctx, `
+INSERT INTO blog_comments (
+    id, post_id, parent_id, author_name, content, status, owner_token_hash
+) VALUES ($1,$2,$3,$4,$5,$6,$7)
+`, c.ID, c.PostID, c.ParentID, c.AuthorName, c.Content, c.Status, c.OwnerTokenHash)
+	return err
+}
+
+func (s *SQLXStore) GetCommentByID(ctx context.Context, id string) (*Comment, error) {
+	var c Comment
+	err := s.DB.GetContext(ctx, &c, `
+SELECT id, post_id, parent_id, author_name, content, status, owner_token_hash, created_at, updated_at, spam_checked_at, spam_reason
+FROM blog_comments WHERE id = $1`, id)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &c, nil
+}
+
+func (s *SQLXStore) ListCommentsByPost(ctx context.Context, postID string) ([]Comment, error) {
+	comments := []Comment{}
+	err := s.DB.SelectContext(ctx, &comments, `
+SELECT id, post_id, parent_id, author_name, content, status, owner_token_hash, created_at, updated_at, spam_checked_at, spam_reason
+FROM blog_comments WHERE post_id = $1
+ORDER BY created_at ASC`, postID)
+	if err != nil {
+		return nil, err
+	}
+	return comments, nil
+}
+
+func (s *SQLXStore) UpdateCommentContentByOwner(ctx context.Context, id, ownerTokenHash, content string) (bool, error) {
+	res, err := s.DB.ExecContext(ctx, `
+UPDATE blog_comments
+SET content = $1, updated_at = CURRENT_TIMESTAMP
+WHERE id = $2 AND owner_token_hash = $3 AND status != 'rejected'
+`, content, id, ownerTokenHash)
+	if err != nil {
+		return false, err
+	}
+	rows, err := res.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	return rows > 0, nil
+}
+
+func (s *SQLXStore) DeleteCommentByOwner(ctx context.Context, id, ownerTokenHash string) (bool, error) {
+	res, err := s.DB.ExecContext(ctx, `DELETE FROM blog_comments WHERE id = $1 AND owner_token_hash = $2`, id, ownerTokenHash)
+	if err != nil {
+		return false, err
+	}
+	rows, err := res.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	return rows > 0, nil
+}
+
+func (s *SQLXStore) UpdateCommentStatus(ctx context.Context, id, status string, spamReason *string) error {
+	_, err := s.DB.ExecContext(ctx, `
+UPDATE blog_comments
+SET status = $1,
+    spam_reason = $2,
+    updated_at = CURRENT_TIMESTAMP,
+    spam_checked_at = CASE WHEN $1 IN ('approved', 'rejected') THEN CURRENT_TIMESTAMP ELSE spam_checked_at END
+WHERE id = $3
+`, status, spamReason, id)
+	return err
+}
+
+func (s *SQLXStore) ListCommentsForModeration(ctx context.Context, status string, limit, offset int) ([]AdminComment, error) {
+	comments := []AdminComment{}
+	query := `
+SELECT c.id, c.post_id, c.parent_id, c.author_name, c.content, c.status, c.owner_token_hash, c.created_at, c.updated_at, c.spam_checked_at, c.spam_reason,
+       p.title AS post_title, p.slug AS post_slug
+FROM blog_comments c
+JOIN blog_posts p ON p.id = c.post_id`
+	args := []any{}
+	if strings.TrimSpace(status) != "" {
+		query += " WHERE c.status = $1"
+		args = append(args, status)
+	}
+	query += " ORDER BY c.created_at DESC LIMIT $" + fmt.Sprintf("%d", len(args)+1) + " OFFSET $" + fmt.Sprintf("%d", len(args)+2)
+	args = append(args, limit, offset)
+
+	err := s.DB.SelectContext(ctx, &comments, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	return comments, nil
+}
+
+func (s *SQLXStore) DeleteCommentByID(ctx context.Context, id string) error {
+	_, err := s.DB.ExecContext(ctx, `DELETE FROM blog_comments WHERE id = $1`, id)
 	return err
 }
