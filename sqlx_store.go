@@ -82,6 +82,20 @@ CREATE INDEX IF NOT EXISTS idx_blog_comments_post_id ON blog_comments(post_id);
 CREATE INDEX IF NOT EXISTS idx_blog_comments_status ON blog_comments(status);
 CREATE INDEX IF NOT EXISTS idx_blog_comments_parent_id ON blog_comments(parent_id);
 `
+
+	SchemaBlogTasks = `
+CREATE TABLE IF NOT EXISTS blog_tasks (
+	id TEXT PRIMARY KEY,
+	task_type TEXT NOT NULL,
+	status TEXT NOT NULL DEFAULT 'pending',
+	payload TEXT NOT NULL DEFAULT '{}',
+	result TEXT NOT NULL DEFAULT '{}',
+	error_message TEXT,
+	created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+	updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_blog_tasks_status ON blog_tasks(status);
+`
 )
 
 // SQLXStore is a reference implementation of BlogStore using sqlx.
@@ -608,6 +622,82 @@ LIMIT $2`, postID, limit)
 		return nil, err
 	}
 	return posts, nil
+}
+
+// --- Task store methods ---
+
+func (s *SQLXStore) CreateTask(ctx context.Context, task *Task) error {
+	if task.ID == "" {
+		task.ID = generateID()
+	}
+	if task.Status == "" {
+		task.Status = "pending"
+	}
+	if task.Payload == "" {
+		task.Payload = "{}"
+	}
+	if task.Result == "" {
+		task.Result = "{}"
+	}
+	_, err := s.DB.ExecContext(ctx, `
+INSERT INTO blog_tasks (id, task_type, status, payload, result, error_message)
+VALUES ($1, $2, $3, $4, $5, $6)`,
+		task.ID, task.TaskType, task.Status, task.Payload, task.Result, task.ErrorMessage)
+	return err
+}
+
+func (s *SQLXStore) GetTask(ctx context.Context, id string) (*Task, error) {
+	var task Task
+	err := s.DB.GetContext(ctx, &task, `
+SELECT id, task_type, status, payload, result, error_message, created_at, updated_at
+FROM blog_tasks WHERE id = $1`, id)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &task, nil
+}
+
+func (s *SQLXStore) ListPendingTasks(ctx context.Context) ([]Task, error) {
+	tasks := []Task{}
+	err := s.DB.SelectContext(ctx, &tasks, `
+SELECT id, task_type, status, payload, result, error_message, created_at, updated_at
+FROM blog_tasks WHERE status = 'pending'
+ORDER BY created_at ASC LIMIT 50`)
+	if err != nil {
+		return nil, err
+	}
+	return tasks, nil
+}
+
+func (s *SQLXStore) ListRecentTasks(ctx context.Context, limit int) ([]Task, error) {
+	tasks := []Task{}
+	err := s.DB.SelectContext(ctx, &tasks, `
+SELECT id, task_type, status, payload, result, error_message, created_at, updated_at
+FROM blog_tasks
+ORDER BY created_at DESC LIMIT $1`, limit)
+	if err != nil {
+		return nil, err
+	}
+	return tasks, nil
+}
+
+func (s *SQLXStore) UpdateTask(ctx context.Context, task *Task) error {
+	_, err := s.DB.ExecContext(ctx, `
+UPDATE blog_tasks
+SET status = $1, result = $2, error_message = $3, updated_at = $4
+WHERE id = $5`,
+		task.Status, task.Result, task.ErrorMessage, task.UpdatedAt, task.ID)
+	return err
+}
+
+func (s *SQLXStore) ResetRunningTasks(ctx context.Context) error {
+	_, err := s.DB.ExecContext(ctx, `
+UPDATE blog_tasks SET status = 'pending', updated_at = CURRENT_TIMESTAMP
+WHERE status = 'running'`)
+	return err
 }
 
 // tagSlug converts a tag name to a URL-friendly slug.

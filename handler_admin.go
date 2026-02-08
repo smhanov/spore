@@ -31,6 +31,11 @@ func (s *service) mountAdminRoutes(r chi.Router) {
 		r.Put("/ai/settings", s.handleAdminUpdateAISettings)
 		r.Post("/ai/chat", s.handleAdminAIChat)
 
+		r.Get("/wxr/export", s.handleAdminExportWXR)
+		r.Post("/wxr/import", s.handleAdminImportWXR)
+
+		r.Get("/tasks", s.handleAdminListTasks)
+
 		// Image endpoints (only available if ImageStore is configured)
 		r.Get("/images/enabled", s.handleImagesEnabled)
 		r.Post("/images", s.handleUploadImage)
@@ -109,6 +114,10 @@ func (s *service) handleAdminCreatePost(w http.ResponseWriter, r *http.Request) 
 	if strings.TrimSpace(p.ContentMarkdown) != "" {
 		s.generatePostTags(p.ID)
 	}
+	// Trigger async description generation if blank
+	if strings.TrimSpace(p.MetaDescription) == "" && strings.TrimSpace(p.ContentMarkdown) != "" {
+		s.queueDescriptionGeneration(p.ID)
+	}
 	writeJSON(w, p)
 }
 
@@ -151,6 +160,10 @@ func (s *service) handleAdminUpdatePost(w http.ResponseWriter, r *http.Request) 
 	}
 	if contentSignificantlyChanged(oldContent, p.ContentMarkdown) {
 		s.generatePostTags(p.ID)
+		// Re-generate description if blank and content changed
+		if strings.TrimSpace(p.MetaDescription) == "" {
+			s.queueDescriptionGeneration(p.ID)
+		}
 	}
 
 	writeJSON(w, p)
@@ -264,6 +277,15 @@ func (s *service) serveAdminSPA(dist fs.FS) http.HandlerFunc {
 		info, _ := fallback.Stat()
 		http.ServeContent(w, r, path.Base("index.html"), info.ModTime(), fallback.(io.ReadSeeker))
 	}
+}
+
+func (s *service) handleAdminListTasks(w http.ResponseWriter, r *http.Request) {
+	tasks, err := s.cfg.Store.ListRecentTasks(r.Context(), 50)
+	if err != nil {
+		http.Error(w, "failed to list tasks", http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, tasks)
 }
 
 func writeJSON(w http.ResponseWriter, v any) {

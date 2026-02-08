@@ -28,6 +28,14 @@ type Config struct {
 	AdminAuthMiddleware func(http.Handler) http.Handler
 	LayoutTemplatePath  string
 	CustomCSSURLs       []string
+	// Optional metadata used for WXR export/import.
+	SiteTitle                string
+	SiteDescription          string
+	SiteURL                  string
+	SiteLanguage             string
+	DefaultAuthorLogin       string
+	DefaultAuthorDisplayName string
+	ImportAuthorID           int
 }
 
 type service struct {
@@ -35,6 +43,7 @@ type service struct {
 	templates   map[string]*template.Template
 	routePrefix string
 	adminFS     fs.FS
+	tasks       *taskRunner
 }
 
 // NewHandler wires routes for public and admin surfaces using the supplied configuration.
@@ -78,6 +87,10 @@ func NewHandler(cfg Config) (http.Handler, error) {
 		s.mountAdminRoutes(adminRouter)
 		r.Mount("/admin", adminRouter)
 	})
+
+	// Start background task runner (resumes pending tasks from DB)
+	s.tasks = newTaskRunner(s)
+	s.tasks.start()
 
 	return r, nil
 }

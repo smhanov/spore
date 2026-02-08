@@ -39,4 +39,11 @@ var migrations = []migration{
 			"ALTER TABLE blog_settings ADD COLUMN date_display TEXT NOT NULL DEFAULT 'absolute'",
 		},
 	},
+	{
+		Version: 5,
+		Name:    "create tasks table",
+		Statements: []string{
+			SchemaBlogTasks,
+		},
+	},
 }

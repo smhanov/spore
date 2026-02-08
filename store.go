@@ -66,4 +66,12 @@ type BlogStore interface {
 	UpdateCommentStatus(ctx context.Context, id, status string, spamReason *string) error
 	ListCommentsForModeration(ctx context.Context, status string, limit, offset int) ([]AdminComment, error)
 	DeleteCommentByID(ctx context.Context, id string) error
+
+	// Tasks
+	CreateTask(ctx context.Context, task *Task) error
+	GetTask(ctx context.Context, id string) (*Task, error)
+	ListPendingTasks(ctx context.Context) ([]Task, error)
+	ListRecentTasks(ctx context.Context, limit int) ([]Task, error)
+	UpdateTask(ctx context.Context, task *Task) error
+	ResetRunningTasks(ctx context.Context) error
 }

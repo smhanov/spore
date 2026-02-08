@@ -214,6 +214,15 @@ func (m *mockStore) DeleteCommentByID(ctx context.Context, id string) error {
 	return nil
 }
 
+func (m *mockStore) CreateTask(ctx context.Context, task *Task) error    { return nil }
+func (m *mockStore) GetTask(ctx context.Context, id string) (*Task, error) { return nil, nil }
+func (m *mockStore) ListPendingTasks(ctx context.Context) ([]Task, error) { return nil, nil }
+func (m *mockStore) ListRecentTasks(ctx context.Context, limit int) ([]Task, error) {
+	return nil, nil
+}
+func (m *mockStore) UpdateTask(ctx context.Context, task *Task) error  { return nil }
+func (m *mockStore) ResetRunningTasks(ctx context.Context) error       { return nil }
+
 func TestNewHandlerRequiresStore(t *testing.T) {
 	if _, err := NewHandler(Config{}); err == nil {
 		t.Fatalf("expected error when store is missing")

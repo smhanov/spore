@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 
+	htmd "github.com/JohannesKaufmann/html-to-markdown/v2"
 	"github.com/google/uuid"
 	"github.com/yuin/goldmark"
 )
@@ -29,4 +30,9 @@ func markdownToHTML(markdown string) (string, error) {
 		return "", err
 	}
 	return buf.String(), nil
+}
+
+// htmlToMarkdown converts HTML content to Markdown.
+func htmlToMarkdown(html string) (string, error) {
+	return htmd.ConvertString(html)
 }

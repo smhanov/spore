@@ -65,3 +65,15 @@ type AdminComment struct {
 	PostTitle string `json:"post_title" db:"post_title"`
 	PostSlug  string `json:"post_slug" db:"post_slug"`
 }
+
+// Task represents an asynchronous background task that can be persisted and resumed.
+type Task struct {
+	ID           string     `json:"id" db:"id"`
+	TaskType     string     `json:"task_type" db:"task_type"`
+	Status       string     `json:"status" db:"status"`
+	Payload      string     `json:"payload" db:"payload"`
+	Result       string     `json:"result" db:"result"`
+	ErrorMessage *string    `json:"error_message,omitempty" db:"error_message"`
+	CreatedAt    time.Time  `json:"created_at" db:"created_at"`
+	UpdatedAt    time.Time  `json:"updated_at" db:"updated_at"`
+}

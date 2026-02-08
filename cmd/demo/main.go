@@ -21,6 +21,7 @@ type memoryStore struct {
 	ai       *blog.AISettings
 	settings *blog.BlogSettings
 	comments map[string]blog.Comment
+	tasks    map[string]blog.Task
 }
 
 func (m *memoryStore) Migrate(ctx context.Context) error {
@@ -365,6 +366,75 @@ func (m *memoryStore) DeleteCommentByID(ctx context.Context, id string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	delete(m.comments, id)
+	return nil
+}
+
+// --- Task methods (in-memory, non-persistent) ---
+
+func (m *memoryStore) CreateTask(ctx context.Context, task *blog.Task) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.tasks == nil {
+		m.tasks = map[string]blog.Task{}
+	}
+	m.tasks[task.ID] = *task
+	return nil
+}
+
+func (m *memoryStore) GetTask(ctx context.Context, id string) (*blog.Task, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	t, ok := m.tasks[id]
+	if !ok {
+		return nil, nil
+	}
+	return &t, nil
+}
+
+func (m *memoryStore) ListPendingTasks(ctx context.Context) ([]blog.Task, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	var out []blog.Task
+	for _, t := range m.tasks {
+		if t.Status == "pending" {
+			out = append(out, t)
+		}
+	}
+	return out, nil
+}
+
+func (m *memoryStore) ListRecentTasks(ctx context.Context, limit int) ([]blog.Task, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	var out []blog.Task
+	for _, t := range m.tasks {
+		out = append(out, t)
+	}
+	if len(out) > limit {
+		out = out[:limit]
+	}
+	return out, nil
+}
+
+func (m *memoryStore) UpdateTask(ctx context.Context, task *blog.Task) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.tasks == nil {
+		return nil
+	}
+	m.tasks[task.ID] = *task
+	return nil
+}
+
+func (m *memoryStore) ResetRunningTasks(ctx context.Context) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for id, t := range m.tasks {
+		if t.Status == "running" {
+			t.Status = "pending"
+			m.tasks[id] = t
+		}
+	}
 	return nil
 }
 

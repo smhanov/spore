@@ -73,6 +73,33 @@ export async function sendAIChat(data) {
   return jsonRequest(`${base}/api/ai/chat`, { method: 'POST', body: JSON.stringify(data) })
 }
 
+// WXR import/export
+export async function exportWXR() {
+  const res = await fetch(`${base}/api/wxr/export`)
+  if (!res.ok) {
+    const body = await res.text()
+    throw new Error(`Export failed ${res.status}: ${body}`)
+  }
+  return res.blob()
+}
+
+export async function importWXR(file) {
+  const formData = new FormData()
+  formData.append('file', file)
+
+  const res = await fetch(`${base}/api/wxr/import`, {
+    method: 'POST',
+    body: formData,
+  })
+
+  if (!res.ok) {
+    const body = await res.text()
+    throw new Error(`Import failed ${res.status}: ${body}`)
+  }
+
+  return res.json()
+}
+
 // Image API
 export async function isImageUploadEnabled() {
   const result = await jsonRequest(`${base}/api/images/enabled`)

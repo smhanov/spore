@@ -205,7 +205,7 @@ func buildAIPrompt(content, query string) []*llmhub.Message {
 }
 
 func parseAIResponse(text string) (string, string) {
-	trimmed := strings.TrimSpace(text)
+	trimmed := stripThinkTags(text)
 	if trimmed == "" {
 		return "", ""
 	}
@@ -280,18 +280,40 @@ var (
 	markdownBulletRe     = regexp.MustCompile(`(?m)^\s*[-*+]\s+`)
 	markdownOrderedRe    = regexp.MustCompile(`(?m)^\s*\d+\.\s+`)
 	htmlTagRe            = regexp.MustCompile(`<[^>]+>`)
+	thinkTagRe           = regexp.MustCompile(`(?si)<think>.*?</think>`)
 )
+
+// dumbAISettings returns the dumb AI provider settings, falling back to smart
+// if the dumb provider is not configured. Returns nil if neither is configured.
+func dumbAISettings(settings *AISettings) *AIProviderSettings {
+	if settings == nil {
+		return nil
+	}
+	if aiProviderConfigured(settings.Dumb) {
+		return &settings.Dumb
+	}
+	if aiProviderConfigured(settings.Smart) {
+		return &settings.Smart
+	}
+	return nil
+}
+
+// stripThinkTags removes <think>...</think> blocks from AI responses.
+func stripThinkTags(text string) string {
+	return strings.TrimSpace(thinkTagRe.ReplaceAllString(text, ""))
+}
 
 func (s *service) checkCommentSpam(ctx context.Context, comment Comment, post Post) (bool, string, error) {
 	settings, err := s.cfg.Store.GetAISettings(ctx)
 	if err != nil {
 		return false, "", err
 	}
-	if settings == nil || !aiProviderConfigured(settings.Dumb) {
+	provider := dumbAISettings(settings)
+	if provider == nil {
 		return false, "", nil
 	}
 
-	client, err := newLLMClient(settings.Dumb, false)
+	client, err := newLLMClient(*provider, false)
 	if err != nil {
 		return false, "", err
 	}
@@ -304,8 +326,8 @@ func (s *service) checkCommentSpam(ctx context.Context, comment Comment, post Po
 	log.Printf(
 		"ai spam-check start comment_id=%s provider=%s model=%s",
 		comment.ID,
-		strings.ToLower(strings.TrimSpace(settings.Dumb.Provider)),
-		strings.TrimSpace(settings.Dumb.Model),
+		strings.ToLower(strings.TrimSpace(provider.Provider)),
+		strings.TrimSpace(provider.Model),
 	)
 	resp, err := client.Generate(ctx, prompt)
 	if err != nil {
@@ -376,7 +398,7 @@ func markdownToPlainText(markdown string) string {
 }
 
 func parseCommentSpamResponse(text string) (bool, string) {
-	trimmed := strings.TrimSpace(text)
+	trimmed := stripThinkTags(text)
 	if trimmed == "" {
 		return false, ""
 	}
@@ -415,11 +437,15 @@ func (s *service) generatePostTags(postID string) {
 		}
 
 		settings, err := s.cfg.Store.GetAISettings(ctx)
-		if err != nil || settings == nil || !aiProviderConfigured(settings.Dumb) {
+		if err != nil {
+			return
+		}
+		provider := dumbAISettings(settings)
+		if provider == nil {
 			return
 		}
 
-		client, err := newLLMClient(settings.Dumb, false)
+		client, err := newLLMClient(*provider, false)
 		if err != nil {
 			return
 		}
@@ -429,8 +455,8 @@ func (s *service) generatePostTags(postID string) {
 		log.Printf(
 			"ai tagger start post_id=%s provider=%s model=%s",
 			post.ID,
-			strings.ToLower(strings.TrimSpace(settings.Dumb.Provider)),
-			strings.TrimSpace(settings.Dumb.Model),
+			strings.ToLower(strings.TrimSpace(provider.Provider)),
+			strings.TrimSpace(provider.Model),
 		)
 		resp, err := client.Generate(ctx, prompt)
 		if err != nil {
@@ -478,7 +504,7 @@ Example 2: Input Title: "My travels to Japan and the best Ramen I ate" Input Con
 }
 
 func parseTaggingResponse(text string) []string {
-	trimmed := strings.TrimSpace(text)
+	trimmed := stripThinkTags(text)
 	if trimmed == "" {
 		return nil
 	}

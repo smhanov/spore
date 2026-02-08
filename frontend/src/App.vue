@@ -57,6 +57,13 @@
             <i class="ph ph-chat-circle-dots text-lg"></i>
             Comments
           </a>
+
+          <a href="#" @click.prevent="currentView = 'wxr'; sidebarOpen = false" 
+             :class="['flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all duration-200 group', 
+             currentView === 'wxr' ? 'bg-brand-50 text-brand-700 shadow-sm ring-1 ring-brand-100' : 'text-slate-600 hover:bg-white hover:shadow-sm']">
+            <i class="ph ph-arrows-clockwise text-lg"></i>
+            Import / Export
+          </a>
         </nav>
 
         <div class="p-4 border-t border-slate-200/60">
@@ -545,6 +552,59 @@
           </div>
         </div>
 
+        <!-- VIEW: IMPORT / EXPORT -->
+        <div v-else-if="currentView === 'wxr'" class="h-full flex flex-col overflow-y-auto">
+          <div class="p-4 md:p-8 pb-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div>
+              <h2 class="text-2xl font-bold text-slate-900">Import / Export</h2>
+              <p class="text-slate-500 text-sm mt-1">Move your entire blog using WordPress WXR files</p>
+            </div>
+            <button @click="handleExportWXR" :disabled="wxrExporting"
+              :class="['text-white px-5 py-2.5 rounded-xl text-sm font-medium shadow-lg transition-all active:scale-95 flex items-center gap-2', wxrExporting ? 'bg-slate-500 cursor-not-allowed' : 'bg-slate-900 hover:bg-slate-800']">
+              <i v-if="wxrExporting" class="ph ph-spinner animate-spin"></i>
+              {{ wxrExporting ? 'Exporting...' : 'Export WXR' }}
+            </button>
+          </div>
+
+          <div class="px-4 md:px-8 pb-8 space-y-6">
+            <div class="bg-white border border-slate-200/60 rounded-2xl p-5 shadow-sm space-y-3">
+              <div>
+                <h3 class="text-lg font-bold text-slate-900">Export Blog</h3>
+                <p class="text-sm text-slate-500 mt-1">Download a WXR file containing all posts, tags, and comments.</p>
+              </div>
+              <button @click="handleExportWXR" :disabled="wxrExporting"
+                :class="['text-white px-4 py-2 rounded-lg text-sm font-semibold transition-all', wxrExporting ? 'bg-slate-400 cursor-not-allowed' : 'bg-slate-900 hover:bg-slate-800']">
+                <i class="ph ph-download-simple"></i>
+                Download Export
+              </button>
+            </div>
+
+            <div class="bg-white border border-slate-200/60 rounded-2xl p-5 shadow-sm space-y-4">
+              <div>
+                <h3 class="text-lg font-bold text-slate-900">Import Blog</h3>
+                <p class="text-sm text-slate-500 mt-1">Upload a WXR file. Existing posts and comments are skipped.</p>
+              </div>
+              <div class="flex flex-col md:flex-row md:items-center gap-3">
+                <input type="file" accept=".xml,text/xml,application/xml" @change="onWXRFileChange"
+                  class="block w-full text-sm text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-slate-100 file:text-slate-700 hover:file:bg-slate-200" />
+                <button @click="handleImportWXR" :disabled="wxrImporting || !wxrFile"
+                  :class="['text-white px-4 py-2 rounded-lg text-sm font-semibold transition-all', (wxrImporting || !wxrFile) ? 'bg-slate-400 cursor-not-allowed' : 'bg-emerald-600 hover:bg-emerald-700']">
+                  <i v-if="wxrImporting" class="ph ph-spinner animate-spin"></i>
+                  {{ wxrImporting ? 'Importing...' : 'Import WXR' }}
+                </button>
+              </div>
+
+              <div v-if="wxrResult" class="text-sm text-slate-600 bg-slate-50 border border-slate-200/60 rounded-xl p-4">
+                <p class="font-semibold text-slate-800">Import summary</p>
+                <p>Posts added: {{ wxrResult.posts_added }}</p>
+                <p>Posts skipped: {{ wxrResult.posts_skipped }}</p>
+                <p>Comments added: {{ wxrResult.comments_added }}</p>
+                <p>Comments skipped: {{ wxrResult.comments_skipped }}</p>
+              </div>
+            </div>
+          </div>
+        </div>
+
       </main>
     </div>
   </div>
@@ -554,7 +614,7 @@
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
-import { listPosts, createPost, updatePost, deletePost, getAISettings, updateAISettings, sendAIChat, getBlogSettings, updateBlogSettings, listComments, updateCommentStatus, deleteComment } from './api'
+import { listPosts, createPost, updatePost, deletePost, getAISettings, updateAISettings, sendAIChat, getBlogSettings, updateBlogSettings, listComments, updateCommentStatus, deleteComment, exportWXR, importWXR } from './api'
 import MarkdownEditor from './components/MarkdownEditor.vue'
 
 // --- State ---
@@ -584,6 +644,10 @@ const blogSettingsSaving = ref(false)
 const moderationComments = ref([])
 const commentLoading = ref(false)
 const commentFilter = ref('pending')
+const wxrFile = ref(null)
+const wxrExporting = ref(false)
+const wxrImporting = ref(false)
+const wxrResult = ref(null)
 const commentFilters = [
   { key: 'pending', label: 'Pending' },
   { key: 'rejected', label: 'Rejected' },
@@ -779,6 +843,51 @@ async function removeModerationComment(comment) {
 
 function copySmartToDumb() {
   aiSettings.value.dumb = { ...aiSettings.value.smart }
+}
+
+function onWXRFileChange(event) {
+  const file = event.target?.files?.[0] || null
+  wxrFile.value = file
+  wxrResult.value = null
+}
+
+async function handleExportWXR() {
+  wxrExporting.value = true
+  try {
+    const blob = await exportWXR()
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = `blog-export-${new Date().toISOString().slice(0, 10)}.xml`
+    document.body.appendChild(link)
+    link.click()
+    link.remove()
+    URL.revokeObjectURL(url)
+    showToast('Export downloaded')
+  } catch (err) {
+    showToast('Failed to export: ' + err.message, 'error')
+  } finally {
+    wxrExporting.value = false
+  }
+}
+
+async function handleImportWXR() {
+  if (!wxrFile.value) {
+    showToast('Select a WXR file to import', 'error')
+    return
+  }
+  wxrImporting.value = true
+  try {
+    const result = await importWXR(wxrFile.value)
+    wxrResult.value = result
+    wxrFile.value = null
+    await loadPosts()
+    showToast('Import completed')
+  } catch (err) {
+    showToast('Failed to import: ' + err.message, 'error')
+  } finally {
+    wxrImporting.value = false
+  }
 }
 
 async function sendAI() {
