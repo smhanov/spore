@@ -29,6 +29,7 @@ func newStoreAdapter(store BlogStore) *storeAdapter {
 
 type postAttrs struct {
 	Title           string `json:"title"`
+	Subtitle        string `json:"subtitle"`
 	ContentMarkdown string `json:"content_markdown"`
 	ContentHTML     string `json:"content_html"`
 	MetaDescription string `json:"meta_description"`
@@ -89,6 +90,7 @@ func entityFromPost(p *Post) *Entity {
 	p.UpdatedAt = &now
 	attrs := postAttrs{
 		Title:           p.Title,
+		Subtitle:        p.Subtitle,
 		ContentMarkdown: p.ContentMarkdown,
 		ContentHTML:     p.ContentHTML,
 		MetaDescription: p.MetaDescription,
@@ -104,6 +106,7 @@ func entityFromPost(p *Post) *Entity {
 		UpdatedAt:   p.UpdatedAt,
 		Attrs: Attributes{
 			"title":            attrs.Title,
+			"subtitle":         attrs.Subtitle,
 			"content_markdown": attrs.ContentMarkdown,
 			"content_html":     attrs.ContentHTML,
 			"meta_description": attrs.MetaDescription,
@@ -128,6 +131,7 @@ func entityToPost(e *Entity) (*Post, error) {
 		ID:              e.ID,
 		Slug:            e.Slug,
 		Title:           attrs.Title,
+		Subtitle:        attrs.Subtitle,
 		ContentMarkdown: attrs.ContentMarkdown,
 		ContentHTML:     attrs.ContentHTML,
 		PublishedAt:     e.PublishedAt,

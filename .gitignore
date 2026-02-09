@@ -25,7 +25,7 @@ go.work
 
 # Uploads and images
 /uploads/
-/images/*.meta
+/images/*
 
 # Frontend
 /frontend/node_modules/

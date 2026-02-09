@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"flag"
 	"fmt"
 	"log"
 	"net/http"
@@ -121,6 +122,7 @@ func postToEntity(post blog.Post) *blog.Entity {
 		PublishedAt: post.PublishedAt,
 		Attrs: blog.Attributes{
 			"title":            post.Title,
+			"subtitle":         post.Subtitle,
 			"content_markdown": post.ContentMarkdown,
 			"content_html":     post.ContentHTML,
 			"meta_description": post.MetaDescription,
@@ -233,6 +235,9 @@ func sliceEntities(entities []*blog.Entity, limit, offset int) []*blog.Entity {
 }
 
 func main() {
+	port := flag.Int("port", 8080, "port to listen on")
+	flag.Parse()
+
 	var store blog.BlogStore
 
 	if _, err := os.Stat("blog.db"); err == nil {
@@ -275,8 +280,9 @@ func main() {
 		log.Fatal(err)
 	}
 
-	fmt.Println("Serving blog at http://localhost:8080/blog")
-	if err := http.ListenAndServe(":8080", handler); err != nil {
+	addr := fmt.Sprintf(":%d", *port)
+	fmt.Printf("Serving blog at http://localhost:%d/blog\n", *port)
+	if err := http.ListenAndServe(addr, handler); err != nil {
 		log.Fatal(err)
 	}
 }

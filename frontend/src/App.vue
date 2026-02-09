@@ -238,6 +238,9 @@
               <div class="border-b border-slate-100 p-4 md:px-8 md:pt-8 md:pb-4 space-y-4 bg-white">
                 <input v-model="draftPost.title" @input="autoSlug" type="text" placeholder="Post Title" 
                        class="w-full text-2xl md:text-3xl font-bold placeholder-slate-300 border-none focus:ring-0 p-0 text-slate-900 bg-transparent outline-none">
+
+                <input v-model="draftPost.subtitle" type="text" placeholder="Subtitle (optional)"
+                  class="w-full text-lg md:text-xl font-medium placeholder-slate-300 border-none focus:ring-0 p-0 text-slate-700 bg-transparent outline-none">
                 
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div class="flex items-center gap-2 text-slate-500 border-b border-slate-100 pb-1 focus-within:border-brand-500 transition-colors">
@@ -685,6 +688,7 @@ const toast = ref({
 const draftPost = ref({
   id: null,
   title: '',
+  subtitle: '',
   slug: '',
   date: '',
   published: false,
@@ -956,6 +960,7 @@ const createNewPost = () => {
   draftPost.value = {
     id: null,
     title: '',
+    subtitle: '',
     slug: '',
     date: new Date().toISOString().split('T')[0],
     published: false,
@@ -990,6 +995,7 @@ const editPost = (post) => {
   const mappedPost = {
     id: post.id,
     title: post.title || '',
+    subtitle: post.subtitle || '',
     slug: post.slug || '',
     date: post.published_at ? post.published_at.split('T')[0] : new Date().toISOString().split('T')[0],
     published: !!post.published_at,
@@ -1046,6 +1052,7 @@ async function savePost() {
     // Convert editor format to API format
     const payload = {
       title: draftPost.value.title,
+      subtitle: draftPost.value.subtitle,
       slug: draftPost.value.slug,
       content_markdown: draftPost.value.content,
       content_html: DOMPurify.sanitize(marked.parse(draftPost.value.content || '')),

@@ -2,8 +2,8 @@
 <div class="article-container">
   <div class="article-header">
     <h1 class="article-title">{{.Post.Title}}</h1>
-    {{if .Post.MetaDescription}}
-    <p class="article-subtitle">{{.Post.MetaDescription}}</p>
+    {{if .Post.Subtitle}}
+    <p class="article-subtitle">{{.Post.Subtitle}}</p>
     {{end}}
     <div class="article-meta">
       {{if .Post.PublishedAt}}
@@ -151,6 +151,16 @@
     display: block;
   }
 
+  .article-content pre,
+  .article-content code {
+    font-size: 0.7em;
+    background: #222;
+    color: #ddd;
+    padding:0.5em;
+    border-radius:10px;
+    text-wrap:auto;
+  }
+
   .article-content a {
     color: #2563eb; /* Tailwind blue-600 */
     text-decoration: underline;
@@ -200,17 +210,26 @@
   }
 
   .related-grid {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 24px;
+    column-count: 2;
+    column-gap: 24px;
     margin-bottom: 64px;
   }
 
   .related-card {
-    display: block;
+    display: inline-block;
+    vertical-align: top;
+    width: 100%;
+    break-inside: avoid;
+    
     text-decoration: none;
     color: inherit;
     transition: opacity 0.2s;
+    
+    /* Card styling */
+    background-color: #f9fafb;
+    border-radius: 10px;
+    padding: 16px;
+    margin-bottom: 24px;
   }
   .related-card:hover {
     opacity: 0.8;
@@ -257,7 +276,7 @@
       padding: 24px 16px;
     }
     .related-grid {
-      grid-template-columns: 1fr;
+      column-count: 1;
     }
   }
 </style>

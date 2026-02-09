@@ -7,6 +7,7 @@ type Post struct {
 	ID              string     `json:"id" db:"id"`
 	Slug            string     `json:"slug" db:"slug"`
 	Title           string     `json:"title" db:"title"`
+	Subtitle        string     `json:"subtitle" db:"subtitle"`
 	ContentMarkdown string     `json:"content_markdown" db:"content_markdown"`
 	ContentHTML     string     `json:"content_html" db:"content_html"`
 	PublishedAt     *time.Time `json:"published_at" db:"published_at"`
