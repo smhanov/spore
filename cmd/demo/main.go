@@ -2,10 +2,12 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
 	"os"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -17,11 +19,7 @@ import (
 
 type memoryStore struct {
 	mu       sync.RWMutex
-	posts    map[string]blog.Post // keyed by ID
-	ai       *blog.AISettings
-	settings *blog.BlogSettings
-	comments map[string]blog.Comment
-	tasks    map[string]blog.Task
+	entities map[string]*blog.Entity
 }
 
 func (m *memoryStore) Migrate(ctx context.Context) error {
@@ -29,7 +27,7 @@ func (m *memoryStore) Migrate(ctx context.Context) error {
 }
 
 func newMemoryStore() *memoryStore {
-	return &memoryStore{posts: map[string]blog.Post{}, comments: map[string]blog.Comment{}}
+	return &memoryStore{entities: map[string]*blog.Entity{}}
 }
 
 func (m *memoryStore) seed() {
@@ -44,398 +42,194 @@ func (m *memoryStore) seed() {
 		MetaDescription: "Demo post rendered by GoBlogPlug",
 		AuthorID:        1,
 	}
-	m.posts[p.ID] = p
+	_ = m.Save(context.Background(), postToEntity(p))
 }
 
-func (m *memoryStore) GetPublishedPostBySlug(ctx context.Context, slug string) (*blog.Post, error) {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-	for _, p := range m.posts {
-		if p.Slug == slug && p.PublishedAt != nil {
-			copy := p
-			return &copy, nil
-		}
+func (m *memoryStore) Save(ctx context.Context, e *blog.Entity) error {
+	if e == nil {
+		return nil
 	}
-	return nil, nil
-}
-
-func (m *memoryStore) ListPublishedPosts(ctx context.Context, limit, offset int) ([]blog.Post, error) {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-	var posts []blog.Post
-	for _, p := range m.posts {
-		if p.PublishedAt != nil {
-			posts = append(posts, p)
-		}
-	}
-	// naive ordering by published date desc
-	for i := 0; i < len(posts); i++ {
-		for j := i + 1; j < len(posts); j++ {
-			if posts[j].PublishedAt != nil && posts[i].PublishedAt != nil && posts[j].PublishedAt.After(*posts[i].PublishedAt) {
-				posts[i], posts[j] = posts[j], posts[i]
-			}
-		}
-	}
-	if offset >= len(posts) {
-		return []blog.Post{}, nil
-	}
-	end := offset + limit
-	if end > len(posts) {
-		end = len(posts)
-	}
-	return posts[offset:end], nil
-}
-
-func (m *memoryStore) ListPostsByTag(ctx context.Context, tagSlug string, limit, offset int) ([]blog.Post, error) {
-	return m.ListPublishedPosts(ctx, limit, offset)
-}
-
-func (m *memoryStore) CreatePost(ctx context.Context, p *blog.Post) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if p.ID == "" {
-		p.ID = fmt.Sprintf("%d", len(m.posts)+1)
+	if e.ID == "" {
+		e.ID = fmt.Sprintf("e%d", len(m.entities)+1)
 	}
-	m.posts[p.ID] = *p
+	copy := *e
+	if copy.Attrs == nil {
+		copy.Attrs = blog.Attributes{}
+	}
+	if copy.CreatedAt.IsZero() {
+		copy.CreatedAt = time.Now().UTC()
+	}
+	if copy.UpdatedAt == nil {
+		now := time.Now().UTC()
+		copy.UpdatedAt = &now
+	}
+	copy.Attrs = cloneAttrs(copy.Attrs)
+	m.entities[copy.ID] = &copy
 	return nil
 }
 
-func (m *memoryStore) UpdatePost(ctx context.Context, p *blog.Post) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.posts[p.ID] = *p
-	return nil
-}
-
-func (m *memoryStore) GetPostByID(ctx context.Context, id string) (*blog.Post, error) {
+func (m *memoryStore) Get(ctx context.Context, id string) (*blog.Entity, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	p, ok := m.posts[id]
+	entity, ok := m.entities[id]
 	if !ok {
 		return nil, nil
 	}
-	copy := p
+	copy := *entity
+	copy.Attrs = cloneAttrs(copy.Attrs)
 	return &copy, nil
 }
 
-func (m *memoryStore) DeletePost(ctx context.Context, id string) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	delete(m.posts, id)
-	return nil
-}
-
-func (m *memoryStore) SetPostTags(ctx context.Context, postID string, tagNames []string) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	p, ok := m.posts[postID]
-	if !ok {
-		return nil
-	}
-	var tags []blog.Tag
-	for _, name := range tagNames {
-		name = strings.TrimSpace(name)
-		if name == "" {
+func (m *memoryStore) Find(ctx context.Context, q blog.Query) ([]*blog.Entity, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	var out []*blog.Entity
+	for _, entity := range m.entities {
+		if q.Kind != "" && entity.Kind != q.Kind {
 			continue
 		}
-		tags = append(tags, blog.Tag{ID: name, Name: name, Slug: strings.ToLower(strings.ReplaceAll(name, " ", "-"))})
-	}
-	p.Tags = tags
-	m.posts[postID] = p
-	return nil
-}
-
-func (m *memoryStore) GetPostTags(ctx context.Context, postID string) ([]blog.Tag, error) {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-	p, ok := m.posts[postID]
-	if !ok {
-		return []blog.Tag{}, nil
-	}
-	return p.Tags, nil
-}
-
-func (m *memoryStore) LoadPostsTags(ctx context.Context, posts []blog.Post) error {
-	return nil
-}
-
-func (m *memoryStore) GetRelatedPosts(ctx context.Context, postID string, limit int) ([]blog.Post, error) {
-	return []blog.Post{}, nil
-}
-
-func (m *memoryStore) ListAllPosts(ctx context.Context, limit, offset int) ([]blog.Post, error) {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-	var posts []blog.Post
-	for _, p := range m.posts {
-		posts = append(posts, p)
-	}
-	// Sort by published date (unpublished at end)
-	for i := 0; i < len(posts); i++ {
-		for j := i + 1; j < len(posts); j++ {
-			swap := false
-			if posts[i].PublishedAt == nil && posts[j].PublishedAt != nil {
-				swap = true
-			} else if posts[i].PublishedAt != nil && posts[j].PublishedAt != nil && posts[j].PublishedAt.After(*posts[i].PublishedAt) {
-				swap = true
-			}
-			if swap {
-				posts[i], posts[j] = posts[j], posts[i]
-			}
-		}
-	}
-	if offset >= len(posts) {
-		return []blog.Post{}, nil
-	}
-	end := offset + limit
-	if end > len(posts) {
-		end = len(posts)
-	}
-	return posts[offset:end], nil
-}
-
-func (m *memoryStore) GetAISettings(ctx context.Context) (*blog.AISettings, error) {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-	if m.ai == nil {
-		return nil, nil
-	}
-	copy := *m.ai
-	return &copy, nil
-}
-
-func (m *memoryStore) UpdateAISettings(ctx context.Context, settings *blog.AISettings) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if settings == nil {
-		m.ai = nil
-		return nil
-	}
-	copy := *settings
-	m.ai = &copy
-	return nil
-}
-
-func (m *memoryStore) GetBlogSettings(ctx context.Context) (*blog.BlogSettings, error) {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-	if m.settings == nil {
-		return &blog.BlogSettings{CommentsEnabled: true, DateDisplay: "absolute"}, nil
-	}
-	copy := *m.settings
-	return &copy, nil
-}
-
-func (m *memoryStore) UpdateBlogSettings(ctx context.Context, settings *blog.BlogSettings) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if settings == nil {
-		m.settings = nil
-		return nil
-	}
-	copy := *settings
-	m.settings = &copy
-	return nil
-}
-
-func (m *memoryStore) CreateComment(ctx context.Context, c *blog.Comment) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if c.ID == "" {
-		c.ID = fmt.Sprintf("c%d", len(m.comments)+1)
-	}
-	if c.CreatedAt.IsZero() {
-		c.CreatedAt = time.Now().UTC()
-	}
-	if c.Status == "" {
-		c.Status = "approved"
-	}
-	m.comments[c.ID] = *c
-	return nil
-}
-
-func (m *memoryStore) GetCommentByID(ctx context.Context, id string) (*blog.Comment, error) {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-	c, ok := m.comments[id]
-	if !ok {
-		return nil, nil
-	}
-	copy := c
-	return &copy, nil
-}
-
-func (m *memoryStore) ListCommentsByPost(ctx context.Context, postID string) ([]blog.Comment, error) {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-	var out []blog.Comment
-	for _, c := range m.comments {
-		if c.PostID == postID {
-			out = append(out, c)
-		}
-	}
-	for i := 0; i < len(out); i++ {
-		for j := i + 1; j < len(out); j++ {
-			if out[j].CreatedAt.Before(out[i].CreatedAt) {
-				out[i], out[j] = out[j], out[i]
-			}
-		}
-	}
-	return out, nil
-}
-
-func (m *memoryStore) UpdateCommentContentByOwner(ctx context.Context, id, ownerTokenHash, content string) (bool, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	c, ok := m.comments[id]
-	if !ok || c.OwnerTokenHash != ownerTokenHash || c.Status == "rejected" {
-		return false, nil
-	}
-	c.Content = content
-	now := time.Now().UTC()
-	c.UpdatedAt = &now
-	m.comments[id] = c
-	return true, nil
-}
-
-func (m *memoryStore) DeleteCommentByOwner(ctx context.Context, id, ownerTokenHash string) (bool, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	c, ok := m.comments[id]
-	if !ok || c.OwnerTokenHash != ownerTokenHash {
-		return false, nil
-	}
-	delete(m.comments, id)
-	return true, nil
-}
-
-func (m *memoryStore) UpdateCommentStatus(ctx context.Context, id, status string, spamReason *string) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	c, ok := m.comments[id]
-	if !ok {
-		return nil
-	}
-	c.Status = status
-	if spamReason != nil {
-		reason := *spamReason
-		c.SpamReason = &reason
-	}
-	now := time.Now().UTC()
-	c.UpdatedAt = &now
-	if status == "approved" || status == "rejected" {
-		c.SpamCheckedAt = &now
-	}
-	m.comments[id] = c
-	return nil
-}
-
-func (m *memoryStore) ListCommentsForModeration(ctx context.Context, status string, limit, offset int) ([]blog.AdminComment, error) {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-	var out []blog.AdminComment
-	for _, c := range m.comments {
-		if status != "" && c.Status != status {
+		if !matchesFilters(entity, q.Filter) {
 			continue
 		}
-		post := m.posts[c.PostID]
-		out = append(out, blog.AdminComment{
-			Comment:   c,
-			PostTitle: post.Title,
-			PostSlug:  post.Slug,
-		})
+		copy := *entity
+		copy.Attrs = cloneAttrs(copy.Attrs)
+		out = append(out, &copy)
 	}
-	for i := 0; i < len(out); i++ {
-		for j := i + 1; j < len(out); j++ {
-			if out[j].CreatedAt.After(out[i].CreatedAt) {
-				out[i], out[j] = out[j], out[i]
-			}
+	applyEntityOrder(out, q.OrderBy)
+	return sliceEntities(out, q.Limit, q.Offset), nil
+}
+
+func (m *memoryStore) Delete(ctx context.Context, id string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	delete(m.entities, id)
+	return nil
+}
+
+func postToEntity(post blog.Post) *blog.Entity {
+	status := "draft"
+	if post.PublishedAt != nil {
+		status = "published"
+	}
+	return &blog.Entity{
+		ID:          post.ID,
+		Kind:        "post",
+		Slug:        post.Slug,
+		Status:      status,
+		PublishedAt: post.PublishedAt,
+		Attrs: blog.Attributes{
+			"title":            post.Title,
+			"content_markdown": post.ContentMarkdown,
+			"content_html":     post.ContentHTML,
+			"meta_description": post.MetaDescription,
+			"author_id":        post.AuthorID,
+			"tags":             post.Tags,
+		},
+	}
+}
+
+func cloneAttrs(attrs blog.Attributes) blog.Attributes {
+	if attrs == nil {
+		return blog.Attributes{}
+	}
+	payload, err := json.Marshal(attrs)
+	if err != nil {
+		return blog.Attributes{}
+	}
+	var out blog.Attributes
+	if err := json.Unmarshal(payload, &out); err != nil {
+		return blog.Attributes{}
+	}
+	return out
+}
+
+func matchesFilters(entity *blog.Entity, filter map[string]interface{}) bool {
+	for key, value := range filter {
+		if !matchesFilter(entity, key, value) {
+			return false
 		}
 	}
-	if offset >= len(out) {
-		return []blog.AdminComment{}, nil
-	}
-	end := offset + limit
-	if end > len(out) {
-		end = len(out)
-	}
-	return out[offset:end], nil
+	return true
 }
 
-func (m *memoryStore) DeleteCommentByID(ctx context.Context, id string) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	delete(m.comments, id)
-	return nil
-}
-
-// --- Task methods (in-memory, non-persistent) ---
-
-func (m *memoryStore) CreateTask(ctx context.Context, task *blog.Task) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if m.tasks == nil {
-		m.tasks = map[string]blog.Task{}
+func matchesFilter(entity *blog.Entity, key string, value interface{}) bool {
+	if entity == nil {
+		return false
 	}
-	m.tasks[task.ID] = *task
-	return nil
-}
-
-func (m *memoryStore) GetTask(ctx context.Context, id string) (*blog.Task, error) {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-	t, ok := m.tasks[id]
-	if !ok {
-		return nil, nil
+	stringValue := fmt.Sprint(value)
+	switch key {
+	case "id":
+		return entity.ID == stringValue
+	case "kind":
+		return entity.Kind == stringValue
+	case "slug":
+		return entity.Slug == stringValue
+	case "status":
+		return entity.Status == stringValue
+	case "owner_id":
+		return entity.OwnerID == stringValue
+	case "parent_id":
+		return entity.ParentID == stringValue
+	default:
+		return fmt.Sprint(entity.Attrs[key]) == stringValue
 	}
-	return &t, nil
 }
 
-func (m *memoryStore) ListPendingTasks(ctx context.Context) ([]blog.Task, error) {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-	var out []blog.Task
-	for _, t := range m.tasks {
-		if t.Status == "pending" {
-			out = append(out, t)
+func applyEntityOrder(entities []*blog.Entity, orderBy string) {
+	orderBy = strings.TrimSpace(strings.ToLower(orderBy))
+	field := "created_at"
+	direction := "desc"
+	if orderBy != "" {
+		parts := strings.Fields(orderBy)
+		if len(parts) >= 1 {
+			field = parts[0]
+		}
+		if len(parts) == 2 {
+			direction = strings.ToLower(parts[1])
 		}
 	}
-	return out, nil
-}
-
-func (m *memoryStore) ListRecentTasks(ctx context.Context, limit int) ([]blog.Task, error) {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-	var out []blog.Task
-	for _, t := range m.tasks {
-		out = append(out, t)
-	}
-	if len(out) > limit {
-		out = out[:limit]
-	}
-	return out, nil
-}
-
-func (m *memoryStore) UpdateTask(ctx context.Context, task *blog.Task) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if m.tasks == nil {
-		return nil
-	}
-	m.tasks[task.ID] = *task
-	return nil
-}
-
-func (m *memoryStore) ResetRunningTasks(ctx context.Context) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	for id, t := range m.tasks {
-		if t.Status == "running" {
-			t.Status = "pending"
-			m.tasks[id] = t
+	ascending := direction == "asc"
+	sort.Slice(entities, func(i, j int) bool {
+		left := entityOrderValue(entities[i], field)
+		right := entityOrderValue(entities[j], field)
+		if ascending {
+			return left.Before(right)
 		}
+		return right.Before(left)
+	})
+}
+
+func entityOrderValue(entity *blog.Entity, field string) time.Time {
+	if entity == nil {
+		return time.Time{}
 	}
-	return nil
+	switch field {
+	case "published_at":
+		if entity.PublishedAt != nil {
+			return entity.PublishedAt.UTC()
+		}
+		return time.Time{}
+	case "created_at":
+		return entity.CreatedAt.UTC()
+	default:
+		return entity.CreatedAt.UTC()
+	}
+}
+
+func sliceEntities(entities []*blog.Entity, limit, offset int) []*blog.Entity {
+	if offset < 0 {
+		offset = 0
+	}
+	if offset >= len(entities) {
+		return []*blog.Entity{}
+	}
+	end := len(entities)
+	if limit > 0 && offset+limit < end {
+		end = offset + limit
+	}
+	return entities[offset:end]
 }
 
 func main() {
@@ -465,7 +259,7 @@ func main() {
 		})
 	}
 
-	imageStore, err := blog.NewFileImageStore("images", "/blog/admin/api/images")
+	imageStore, err := blog.NewFileImageStore("images", "/blog/api/images")
 	if err != nil {
 		log.Fatal(err)
 	}

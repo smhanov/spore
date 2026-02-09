@@ -53,10 +53,10 @@ func (s *service) mountAdminRoutes(r chi.Router) {
 }
 
 func (s *service) handleAdminListPosts(w http.ResponseWriter, r *http.Request) {
-	limit := 50
+	limit := 0
 	offset := 0
 	if v := r.URL.Query().Get("limit"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+		if n, err := strconv.Atoi(v); err == nil && n >= 0 {
 			limit = n
 		}
 	}
@@ -66,7 +66,7 @@ func (s *service) handleAdminListPosts(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	posts, err := s.cfg.Store.ListAllPosts(r.Context(), limit, offset)
+	posts, err := s.store.ListAllPosts(r.Context(), limit, offset)
 	if err != nil {
 		http.Error(w, "failed to list posts", http.StatusInternalServerError)
 		return
@@ -76,7 +76,7 @@ func (s *service) handleAdminListPosts(w http.ResponseWriter, r *http.Request) {
 
 func (s *service) handleAdminGetPost(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
-	post, err := s.cfg.Store.GetPostByID(r.Context(), id)
+	post, err := s.store.GetPostByID(r.Context(), id)
 	if err != nil {
 		http.Error(w, "failed to load post", http.StatusInternalServerError)
 		return
@@ -106,18 +106,11 @@ func (s *service) handleAdminCreatePost(w http.ResponseWriter, r *http.Request) 
 		}
 		p.ContentHTML = html
 	}
-	if err := s.cfg.Store.CreatePost(r.Context(), &p); err != nil {
+	if err := s.store.CreatePost(r.Context(), &p); err != nil {
 		http.Error(w, "failed to create post", http.StatusInternalServerError)
 		return
 	}
-	// Trigger async tag generation for new posts with content
-	if strings.TrimSpace(p.ContentMarkdown) != "" {
-		s.generatePostTags(p.ID)
-	}
-	// Trigger async description generation if blank
-	if strings.TrimSpace(p.MetaDescription) == "" && strings.TrimSpace(p.ContentMarkdown) != "" {
-		s.queueDescriptionGeneration(p.ID)
-	}
+	s.queuePostProcessing("post saved")
 	writeJSON(w, p)
 }
 
@@ -136,9 +129,6 @@ func (s *service) handleAdminUpdatePost(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	// Load old post to detect content changes
-	oldPost, _ := s.cfg.Store.GetPostByID(r.Context(), id)
-
 	// Convert markdown to HTML
 	if p.ContentMarkdown != "" {
 		html, err := markdownToHTML(p.ContentMarkdown)
@@ -148,30 +138,18 @@ func (s *service) handleAdminUpdatePost(w http.ResponseWriter, r *http.Request) 
 		}
 		p.ContentHTML = html
 	}
-	if err := s.cfg.Store.UpdatePost(r.Context(), &p); err != nil {
+	if err := s.store.UpdatePost(r.Context(), &p); err != nil {
 		http.Error(w, "failed to update post", http.StatusInternalServerError)
 		return
 	}
-
-	// Re-generate tags if content changed substantially
-	oldContent := ""
-	if oldPost != nil {
-		oldContent = oldPost.ContentMarkdown
-	}
-	if contentSignificantlyChanged(oldContent, p.ContentMarkdown) {
-		s.generatePostTags(p.ID)
-		// Re-generate description if blank and content changed
-		if strings.TrimSpace(p.MetaDescription) == "" {
-			s.queueDescriptionGeneration(p.ID)
-		}
-	}
+	s.queuePostProcessing("post saved")
 
 	writeJSON(w, p)
 }
 
 func (s *service) handleAdminDeletePost(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
-	if err := s.cfg.Store.DeletePost(r.Context(), id); err != nil {
+	if err := s.store.DeletePost(r.Context(), id); err != nil {
 		http.Error(w, "failed to delete post", http.StatusInternalServerError)
 		return
 	}
@@ -213,9 +191,19 @@ func (s *service) handleUploadImage(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "failed to save image", http.StatusInternalServerError)
 		return
 	}
+	savedID := id
+	if url != "" {
+		base := path.Base(url)
+		if base != "" && base != "/" {
+			if ext := path.Ext(base); ext != "" {
+				base = strings.TrimSuffix(base, ext)
+			}
+			savedID = base
+		}
+	}
 
 	writeJSON(w, map[string]string{
-		"id":  id,
+		"id":  savedID,
 		"url": url,
 	})
 }
@@ -280,7 +268,7 @@ func (s *service) serveAdminSPA(dist fs.FS) http.HandlerFunc {
 }
 
 func (s *service) handleAdminListTasks(w http.ResponseWriter, r *http.Request) {
-	tasks, err := s.cfg.Store.ListRecentTasks(r.Context(), 50)
+	tasks, err := s.store.ListRecentTasks(r.Context(), 50)
 	if err != nil {
 		http.Error(w, "failed to list tasks", http.StatusInternalServerError)
 		return

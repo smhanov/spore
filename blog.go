@@ -28,8 +28,10 @@ type Config struct {
 	AdminAuthMiddleware func(http.Handler) http.Handler
 	LayoutTemplatePath  string
 	CustomCSSURLs       []string
+	// StaticFilePath is the optional directory from which to serve files not found as posts.
+	StaticFilePath string
 	// Optional metadata used for WXR export/import.
-	SiteTitle                string
+	SiteTitle string
 	SiteDescription          string
 	SiteURL                  string
 	SiteLanguage             string
@@ -44,6 +46,7 @@ type service struct {
 	routePrefix string
 	adminFS     fs.FS
 	tasks       *taskRunner
+	store       *storeAdapter
 }
 
 // NewHandler wires routes for public and admin surfaces using the supplied configuration.
@@ -72,6 +75,7 @@ func NewHandler(cfg Config) (http.Handler, error) {
 		templates:   tpls,
 		routePrefix: strings.TrimSuffix(routePrefix, "/"),
 		adminFS:     adminAssetsFS,
+		store:       newStoreAdapter(cfg.Store),
 	}
 
 	r := chi.NewRouter()

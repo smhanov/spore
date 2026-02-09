@@ -49,7 +49,7 @@ func (s *service) handleListComments(w http.ResponseWriter, r *http.Request) {
 	}
 
 	slug := chi.URLParam(r, "slug")
-	post, err := s.cfg.Store.GetPublishedPostBySlug(r.Context(), slug)
+	post, err := s.store.GetPublishedPostBySlug(r.Context(), slug)
 	if err != nil {
 		http.Error(w, "failed to load post", http.StatusInternalServerError)
 		return
@@ -60,7 +60,7 @@ func (s *service) handleListComments(w http.ResponseWriter, r *http.Request) {
 	}
 
 	ownerHash := s.ownerTokenHash(r)
-	comments, err := s.cfg.Store.ListCommentsByPost(r.Context(), post.ID)
+	comments, err := s.store.ListCommentsByPost(r.Context(), post.ID)
 	if err != nil {
 		http.Error(w, "failed to list comments", http.StatusInternalServerError)
 		return
@@ -82,7 +82,7 @@ func (s *service) handleCreateComment(w http.ResponseWriter, r *http.Request) {
 	}
 
 	slug := chi.URLParam(r, "slug")
-	post, err := s.cfg.Store.GetPublishedPostBySlug(r.Context(), slug)
+	post, err := s.store.GetPublishedPostBySlug(r.Context(), slug)
 	if err != nil {
 		http.Error(w, "failed to load post", http.StatusInternalServerError)
 		return
@@ -110,7 +110,7 @@ func (s *service) handleCreateComment(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if payload.ParentID != nil {
-		parent, err := s.cfg.Store.GetCommentByID(r.Context(), *payload.ParentID)
+		parent, err := s.store.GetCommentByID(r.Context(), *payload.ParentID)
 		if err != nil {
 			http.Error(w, "failed to load parent", http.StatusInternalServerError)
 			return
@@ -133,7 +133,7 @@ func (s *service) handleCreateComment(w http.ResponseWriter, r *http.Request) {
 		CreatedAt:      time.Now().UTC(),
 	}
 
-	settings, err := s.cfg.Store.GetAISettings(r.Context())
+	settings, err := s.store.GetAISettings(r.Context())
 	if err == nil && settings != nil && aiProviderConfigured(settings.Dumb) {
 		comment.Status = "pending"
 	}
@@ -141,7 +141,7 @@ func (s *service) handleCreateComment(w http.ResponseWriter, r *http.Request) {
 		comment.Status = "approved"
 	}
 
-	if err := s.cfg.Store.CreateComment(r.Context(), &comment); err != nil {
+	if err := s.store.CreateComment(r.Context(), &comment); err != nil {
 		http.Error(w, "failed to save comment", http.StatusInternalServerError)
 		return
 	}
@@ -184,7 +184,7 @@ func (s *service) handleUpdateComment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	updated, err := s.cfg.Store.UpdateCommentContentByOwner(r.Context(), id, ownerHash, payload.Content)
+	updated, err := s.store.UpdateCommentContentByOwner(r.Context(), id, ownerHash, payload.Content)
 	if err != nil {
 		http.Error(w, "failed to update comment", http.StatusInternalServerError)
 		return
@@ -204,7 +204,7 @@ func (s *service) handleDeleteComment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	deleted, err := s.cfg.Store.DeleteCommentByOwner(r.Context(), id, ownerHash)
+	deleted, err := s.store.DeleteCommentByOwner(r.Context(), id, ownerHash)
 	if err != nil {
 		http.Error(w, "failed to delete comment", http.StatusInternalServerError)
 		return
@@ -256,11 +256,16 @@ func buildCommentThread(comments []Comment, ownerHash string) []commentResponse 
 		root.Replies = replies[root.ID]
 	}
 
+	// Reverse roots to show newest threads first
+	for i, j := 0, len(roots)-1; i < j; i, j = i+1, j-1 {
+		roots[i], roots[j] = roots[j], roots[i]
+	}
+
 	return roots
 }
 
 func (s *service) commentsEnabled(r *http.Request) (bool, error) {
-	settings, err := s.cfg.Store.GetBlogSettings(r.Context())
+	settings, err := s.store.GetBlogSettings(r.Context())
 	if err != nil {
 		return false, err
 	}
@@ -299,15 +304,15 @@ func (s *service) runCommentSpamCheck(comment Comment, post Post) {
 	ctx := context.Background()
 	spam, reason, err := s.checkCommentSpam(ctx, comment, post)
 	if err != nil {
-		_ = s.cfg.Store.UpdateCommentStatus(ctx, comment.ID, "approved", nil)
+		_ = s.store.UpdateCommentStatus(ctx, comment.ID, "approved", nil)
 		return
 	}
 	if spam {
 		if strings.TrimSpace(reason) == "" {
 			reason = "flagged as spam"
 		}
-		_ = s.cfg.Store.UpdateCommentStatus(ctx, comment.ID, "rejected", &reason)
+		_ = s.store.UpdateCommentStatus(ctx, comment.ID, "rejected", &reason)
 		return
 	}
-	_ = s.cfg.Store.UpdateCommentStatus(ctx, comment.ID, "approved", nil)
+	_ = s.store.UpdateCommentStatus(ctx, comment.ID, "approved", nil)
 }

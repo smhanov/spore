@@ -2,6 +2,8 @@ package blog
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"os"
@@ -38,23 +40,32 @@ func (s *FileImageStore) SaveImage(ctx context.Context, id, filename, contentTyp
 		ext = extensionFromContentType(contentType)
 	}
 
-	// Create a safe filename using the ID
-	safeFilename := id + ext
-	filePath := filepath.Join(s.Directory, safeFilename)
-
-	file, err := os.Create(filePath)
+	tempFile, err := os.CreateTemp(s.Directory, "img-*")
 	if err != nil {
-		return "", fmt.Errorf("failed to create file: %w", err)
+		return "", fmt.Errorf("failed to create temp file: %w", err)
 	}
-	defer file.Close()
+	defer tempFile.Close()
 
-	if _, err := io.Copy(file, reader); err != nil {
-		os.Remove(filePath)
+	hasher := sha256.New()
+	tee := io.TeeReader(reader, hasher)
+	if _, err := io.Copy(tempFile, tee); err != nil {
+		_ = os.Remove(tempFile.Name())
 		return "", fmt.Errorf("failed to write file: %w", err)
 	}
 
+	hashID := hex.EncodeToString(hasher.Sum(nil))
+	safeFilename := hashID + ext
+	filePath := filepath.Join(s.Directory, safeFilename)
+
+	if _, err := os.Stat(filePath); err == nil {
+		_ = os.Remove(tempFile.Name())
+	} else if err := os.Rename(tempFile.Name(), filePath); err != nil {
+		_ = os.Remove(tempFile.Name())
+		return "", fmt.Errorf("failed to store file: %w", err)
+	}
+
 	// Store metadata in a sidecar file
-	metaPath := filepath.Join(s.Directory, id+".meta")
+	metaPath := filepath.Join(s.Directory, hashID+".meta")
 	metaContent := fmt.Sprintf("%s\n%s", filename, contentType)
 	if err := os.WriteFile(metaPath, []byte(metaContent), 0644); err != nil {
 		// Non-fatal: we can still serve the file

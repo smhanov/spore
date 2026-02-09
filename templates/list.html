@@ -1,33 +1,132 @@
-{{define "content"}}
-  {{if .TagSlug}}
-    <div class="card" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;">
-      <div>
-        <h2 style="margin:0 0 4px">Posts tagged "{{.TagSlug}}"</h2>
-        <p style="margin:0;color:#6b7280;font-size:14px;">Showing posts filtered by this tag.</p>
-      </div>
-      <a href="{{.RoutePrefix}}/" style="font-size:14px;">← All posts</a>
+{{define "content"}} {{if .TagSlug}}
+<div
+  class="card"
+  style="
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 8px;
+  "
+>
+  <div>
+    <h2 style="margin: 0 0 4px">Posts tagged "{{.TagSlug}}"</h2>
+    <p style="margin: 0; color: #6b7280; font-size: 14px">
+      Showing posts filtered by this tag.
+    </p>
+  </div>
+  <a href="{{.RoutePrefix}}/" style="font-size: 14px">← All posts</a>
+</div>
+{{end}} {{if not .Posts}}
+<div class="card">No posts yet.</div>
+{{else}}
+<div
+  id="post-list"
+  data-base="{{.RoutePrefix}}"
+  data-tag="{{.TagSlug}}"
+  data-limit="{{.Limit}}"
+  data-offset="{{.NextOffset}}"
+>
+  {{range .Posts}}
+  <article class="card post-item">
+    <h2><a href="{{$.RoutePrefix}}/{{.Slug}}">{{.Title}}</a></h2>
+    {{if .PublishedAt}}
+    <p style="color: #6b7280">
+      {{formatPublishedDate .PublishedAt $.DateDisplay}}
+    </p>
+    {{end}} {{if .MetaDescription}}
+    <p>{{.MetaDescription}}</p>
+    {{end}} {{if .Tags}}
+    <div style="display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px">
+      {{range .Tags}}
+      <a
+        href="{{$.RoutePrefix}}/tag/{{.Slug}}"
+        style="
+          display: inline-block;
+          padding: 3px 10px;
+          background: #eef2ff;
+          color: #4338ca;
+          font-size: 12px;
+          font-weight: 600;
+          border-radius: 999px;
+          text-decoration: none;
+        "
+        >{{.Name}}</a
+      >
+      {{end}}
     </div>
-  {{end}}
-  {{if not .Posts}}
-    <div class="card">No posts yet.</div>
-  {{else}}
-    {{range .Posts}}
-      <article class="card">
-        <h2><a href="{{$.RoutePrefix}}/{{.Slug}}">{{.Title}}</a></h2>
-        {{if .PublishedAt}}<p style="color:#6b7280;">{{formatPublishedDate .PublishedAt $.DateDisplay}}</p>{{end}}
-        {{if .MetaDescription}}<p>{{.MetaDescription}}</p>{{end}}
-        {{if .Tags}}
-        <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px;">
-          {{range .Tags}}
-            <a href="{{$.RoutePrefix}}/tag/{{.Slug}}" style="display:inline-block;padding:3px 10px;background:#eef2ff;color:#4338ca;font-size:12px;font-weight:600;border-radius:999px;text-decoration:none;">{{.Name}}</a>
-          {{end}}
-        </div>
-        {{end}}
-      </article>
     {{end}}
+  </article>
   {{end}}
+</div>
+<div id="post-list-loading" class="card" hidden>Loading more posts...</div>
+<div id="post-list-sentinel" style="height: 1px"></div>
 {{end}}
 
-{{define "list.html"}}
-  {{template "base.html" .}}
-{{end}}
+<script>
+  (function () {
+    const list = document.getElementById("post-list");
+    if (!list) return;
+
+    let offset = parseInt(list.dataset.offset || "0", 10);
+    const limit = parseInt(list.dataset.limit || "10", 10);
+    const base = list.dataset.base || "";
+    const tag = (list.dataset.tag || "").trim();
+    const sentinel = document.getElementById("post-list-sentinel");
+    const loading = document.getElementById("post-list-loading");
+
+    let busy = false;
+    let done = false;
+
+    async function loadMore() {
+      if (busy || done) return;
+      busy = true;
+      if (loading) loading.hidden = false;
+
+      const path = tag ? `${base}/tag/${encodeURIComponent(tag)}` : `${base}/`;
+      const url = `${path}?limit=${limit}&offset=${offset}`;
+
+      try {
+        const res = await fetch(url, {
+          headers: { "X-Requested-With": "fetch" },
+        });
+        if (!res.ok) {
+          done = true;
+          return;
+        }
+        const html = await res.text();
+        const temp = document.createElement("div");
+        temp.innerHTML = html;
+        const items = temp.querySelectorAll("#post-list .post-item");
+        if (!items.length) {
+          done = true;
+          return;
+        }
+        items.forEach((item) => list.appendChild(item));
+        offset += items.length;
+        if (items.length < limit) {
+          done = true;
+        }
+      } catch (err) {
+        done = true;
+      } finally {
+        if (loading) loading.hidden = true;
+        busy = false;
+      }
+    }
+
+    if (!sentinel) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        entries.forEach((entry) => {
+          if (entry.isIntersecting) {
+            loadMore();
+          }
+        });
+      },
+      { rootMargin: "200px" },
+    );
+    observer.observe(sentinel);
+  })();
+</script>
+{{end}} {{define "list.html"}} {{template "base.html" .}} {{end}}

@@ -6,11 +6,10 @@
     <p style="color: #6b7280">
       {{formatPublishedDate .Post.PublishedAt $.DateDisplay}}
     </p>
-    {{end}}
-    {{if .Post.Tags}}
+    {{end}} {{if .Post.Tags}}
     <div class="post-tags">
       {{range .Post.Tags}}
-        <a href="{{$.RoutePrefix}}/tag/{{.Slug}}" class="tag-pill">{{.Name}}</a>
+      <a href="{{$.RoutePrefix}}/tag/{{.Slug}}" class="tag-pill">{{.Name}}</a>
       {{end}}
     </div>
     {{end}}
@@ -24,19 +23,19 @@
       {{range .RelatedPosts}}
       <a href="{{$.RoutePrefix}}/{{.Slug}}" class="related-card">
         {{if .FirstImage}}
-        <div class="related-image" style="background-image: url('{{.FirstImage}}')"></div>
-        {{else}}
-        <div class="related-image related-image-placeholder">
-          <span>📝</span>
-        </div>
+        <div
+          class="related-image"
+          style="background-image: url('{{.FirstImage}}')"
+        ></div>
         {{end}}
         <div class="related-body">
           <h3>{{.Title}}</h3>
-          {{if .Excerpt}}<p>{{.Excerpt}}</p>{{end}}
-          {{if .Tags}}
+          {{if .Excerpt}}
+          <p>{{.Excerpt}}</p>
+          {{end}} {{if .Tags}}
           <div class="related-tags">
             {{range .Tags}}
-              <span class="tag-pill-sm">{{.Name}}</span>
+            <span class="tag-pill-sm">{{.Name}}</span>
             {{end}}
           </div>
           {{end}}
@@ -97,16 +96,19 @@
   .related-card {
     background: white;
     border-radius: 12px;
-    box-shadow: 0 1px 4px rgba(0,0,0,0.06);
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.06);
     overflow: hidden;
     text-decoration: none;
     color: inherit;
-    transition: box-shadow 0.2s, transform 0.2s;
+    transition:
+      box-shadow 0.2s,
+      transform 0.2s;
     display: flex;
     flex-direction: column;
+    gap: 0;
   }
   .related-card:hover {
-    box-shadow: 0 4px 16px rgba(0,0,0,0.12);
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
     transform: translateY(-2px);
     text-decoration: none;
   }
@@ -419,6 +421,10 @@
     const cancelButton = form.querySelector(".comment-cancel");
     const replyBadge = form.querySelector("[data-reply-badge]");
 
+    // Store original location of the form
+    const formParent = form.parentNode;
+    const formNextSibling = form.nextSibling;
+
     let editingId = null;
     let replyToId = null;
     let replyToName = "";
@@ -445,7 +451,8 @@
 
     function renderMentions(text) {
       const escaped = escapeHTML(text);
-      return escaped.replace(
+      const withBreaks = escaped.replace(/\n/g, "<br>");
+      return withBreaks.replace(
         /(^|\s)@([a-zA-Z0-9_-]{1,30})/g,
         '$1<span class="mention">@$2</span>',
       );
@@ -471,6 +478,10 @@
       }
     }
 
+    function moveFormToOriginalLocation() {
+      formParent.insertBefore(form, formNextSibling);
+    }
+
     function resetForm() {
       editingId = null;
       replyToId = null;
@@ -479,6 +490,7 @@
       submitButton.textContent = "Post comment";
       cancelButton.hidden = true;
       setReplyBadge();
+      moveFormToOriginalLocation();
     }
 
     function renderComments(comments) {
@@ -588,6 +600,13 @@
     }
 
     async function loadComments() {
+      // Ensure form is safe before we potentially wipe the list
+      if (listEl.contains(form)) {
+        moveFormToOriginalLocation();
+        // Since we moved it, we should probably reset state too to match UI
+        resetForm();
+      }
+
       const res = await fetch(base + "/" + postSlug + "/comments");
       if (!res.ok) {
         listEl.innerHTML =
@@ -648,6 +667,15 @@
         replyToId = comment.id;
         replyToName = comment.author_name;
         setReplyBadge();
+        
+        // Move form to this comment
+        const commentItem = btn.closest('.comment-item');
+        // Insert before replies if they exist, or at end
+        const repliesDiv = commentItem.querySelector('.comment-replies');
+        commentItem.insertBefore(form, repliesDiv);
+        
+        cancelButton.hidden = false;
+        
         contentInput.focus();
         if (!contentInput.value.trim()) {
           contentInput.value = "@" + comment.author_name + " ";
@@ -656,6 +684,13 @@
       }
 
       if (action === "edit") {
+        moveFormToOriginalLocation(); // Ensure form is at top for edit (simplest for now)
+        // Or move to comment? Let's keep it simple as planned: reply moves, edit resets to top.
+        // Actually, if we are editing, standard behavior is usually inline edit.
+        // But implementing inline edit properly requires swapping BODY with FORM.
+        // Repurposing "Move form under comment" for edit is slightly weird (you see original text + form).
+        // So I will stick to "Edit moves form to top" (default) to avoid confusion.
+        
         editingId = comment.id;
         nameInput.value = comment.author_name || "";
         contentInput.value = comment.content;

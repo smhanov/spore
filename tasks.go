@@ -26,6 +26,7 @@ const (
 
 	TaskTypeGenerateDescription = "generate_description"
 	TaskTypeGenerateTags        = "generate_tags"
+	TaskTypePostProcessing      = "post_processing"
 	TaskTypeImportImages        = "import_images"
 )
 
@@ -49,7 +50,7 @@ func newTaskRunner(svc *service) *taskRunner {
 // start resets any interrupted tasks and begins the processing loop.
 func (tr *taskRunner) start() {
 	ctx := context.Background()
-	if err := tr.svc.cfg.Store.ResetRunningTasks(ctx); err != nil {
+	if err := tr.svc.store.ResetRunningTasks(ctx); err != nil {
 		log.Printf("tasks: failed to reset running tasks: %v", err)
 	}
 
@@ -76,7 +77,7 @@ func (tr *taskRunner) run() {
 func (tr *taskRunner) processPending() {
 	ctx := context.Background()
 	for {
-		tasks, err := tr.svc.cfg.Store.ListPendingTasks(ctx)
+		tasks, err := tr.svc.store.ListPendingTasks(ctx)
 		if err != nil {
 			log.Printf("tasks: list pending: %v", err)
 			return
@@ -93,7 +94,7 @@ func (tr *taskRunner) processPending() {
 func (tr *taskRunner) processTask(ctx context.Context, task Task) {
 	task.Status = TaskStatusRunning
 	task.UpdatedAt = time.Now().UTC()
-	if err := tr.svc.cfg.Store.UpdateTask(ctx, &task); err != nil {
+	if err := tr.svc.store.UpdateTask(ctx, &task); err != nil {
 		log.Printf("tasks: mark running id=%s: %v", task.ID, err)
 		return
 	}
@@ -107,6 +108,8 @@ func (tr *taskRunner) processTask(ctx context.Context, task Task) {
 		err = tr.svc.processGenerateDescription(ctx, &task)
 	case TaskTypeGenerateTags:
 		err = tr.svc.processGenerateTags(ctx, &task)
+	case TaskTypePostProcessing:
+		err = tr.svc.processPostProcessing(ctx, &task)
 	case TaskTypeImportImages:
 		err = tr.svc.processImportImages(ctx, &task)
 	default:
@@ -124,7 +127,7 @@ func (tr *taskRunner) processTask(ctx context.Context, task Task) {
 	}
 
 	task.UpdatedAt = time.Now().UTC()
-	if updateErr := tr.svc.cfg.Store.UpdateTask(ctx, &task); updateErr != nil {
+	if updateErr := tr.svc.store.UpdateTask(ctx, &task); updateErr != nil {
 		log.Printf("tasks: update id=%s: %v", task.ID, updateErr)
 	}
 }
@@ -142,7 +145,7 @@ func (s *service) queueDescriptionGeneration(postID string) {
 		Payload:  string(payload),
 		Result:   "{}",
 	}
-	if err := s.cfg.Store.CreateTask(context.Background(), &task); err != nil {
+	if err := s.store.CreateTask(context.Background(), &task); err != nil {
 		log.Printf("tasks: queue description post=%s: %v", postID, err)
 		return
 	}
@@ -158,8 +161,24 @@ func (s *service) queueTagGeneration(postID string) {
 		Payload:  string(payload),
 		Result:   "{}",
 	}
-	if err := s.cfg.Store.CreateTask(context.Background(), &task); err != nil {
+	if err := s.store.CreateTask(context.Background(), &task); err != nil {
 		log.Printf("tasks: queue tags post=%s: %v", postID, err)
+		return
+	}
+	s.tasks.nudge()
+}
+
+func (s *service) queuePostProcessing(reason string) {
+	payload, _ := json.Marshal(map[string]string{"reason": reason})
+	task := Task{
+		ID:       generateID(),
+		TaskType: TaskTypePostProcessing,
+		Status:   TaskStatusPending,
+		Payload:  string(payload),
+		Result:   "{}",
+	}
+	if err := s.store.CreateTask(context.Background(), &task); err != nil {
+		log.Printf("tasks: queue post processing reason=%s: %v", reason, err)
 		return
 	}
 	s.tasks.nudge()
@@ -177,11 +196,107 @@ func (s *service) queueImageImport(baseSiteURL string, postIDs []string) {
 		Payload:  string(payload),
 		Result:   "{}",
 	}
-	if err := s.cfg.Store.CreateTask(context.Background(), &task); err != nil {
+	if err := s.store.CreateTask(context.Background(), &task); err != nil {
 		log.Printf("tasks: queue image import: %v", err)
 		return
 	}
 	s.tasks.nudge()
+}
+
+// ---------------------------------------------------------------------------
+// Post processing (async task)
+// ---------------------------------------------------------------------------
+
+func (s *service) processPostProcessing(ctx context.Context, task *Task) error {
+	var payload struct {
+		Reason string `json:"reason"`
+	}
+	_ = json.Unmarshal([]byte(task.Payload), &payload)
+
+	posts, err := s.store.ListAllPosts(ctx, 0, 0)
+	if err != nil {
+		return fmt.Errorf("load posts: %w", err)
+	}
+	log.Printf("tasks: post-processing start reason=%s posts=%d", strings.TrimSpace(payload.Reason), len(posts))
+	if len(posts) == 0 {
+		return nil
+	}
+
+	settings, err := s.store.GetAISettings(ctx)
+	if err != nil {
+		return fmt.Errorf("load ai settings: %w", err)
+	}
+	provider := dumbAISettings(settings)
+	if provider == nil {
+		log.Printf("tasks: post-processing skipped (ai not configured)")
+		return nil
+	}
+
+	client, err := newLLMClient(*provider, false)
+	if err != nil {
+		return fmt.Errorf("create ai client: %w", err)
+	}
+
+	processed := 0
+	filledDescriptions := 0
+	filledTags := 0
+	for _, post := range posts {
+		content := strings.TrimSpace(post.ContentMarkdown)
+		if content == "" {
+			continue
+		}
+
+		missingDesc := strings.TrimSpace(post.MetaDescription) == ""
+		missingTags := len(post.Tags) == 0
+		if !missingDesc && !missingTags {
+			continue
+		}
+
+		processed++
+		log.Printf("tasks: post-processing post_id=%s missing_desc=%t missing_tags=%t", post.ID, missingDesc, missingTags)
+
+		if missingDesc {
+			prompt := buildDescriptionPrompt(post.Title, post.ContentMarkdown)
+			aiCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
+			resp, err := client.Generate(aiCtx, prompt)
+			cancel()
+			if err != nil {
+				log.Printf("tasks: post-processing description failed post_id=%s err=%v", post.ID, err)
+			} else {
+				description := parseDescriptionResponse(resp.Text())
+				if description != "" {
+					post.MetaDescription = description
+					if err := s.store.UpdatePost(ctx, &post); err != nil {
+						log.Printf("tasks: post-processing update description failed post_id=%s err=%v", post.ID, err)
+					} else {
+						filledDescriptions++
+					}
+				}
+			}
+		}
+
+		if missingTags {
+			prompt := buildTaggingPrompt(post.Title, post.ContentMarkdown)
+			aiCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
+			resp, err := client.Generate(aiCtx, prompt)
+			cancel()
+			if err != nil {
+				log.Printf("tasks: post-processing tags failed post_id=%s err=%v", post.ID, err)
+			} else {
+				resultTags := parseTaggingResponse(resp.Text())
+				if len(resultTags) > 0 {
+					if err := s.store.SetPostTags(ctx, post.ID, resultTags); err != nil {
+						log.Printf("tasks: post-processing set tags failed post_id=%s err=%v", post.ID, err)
+					} else {
+						filledTags++
+					}
+				}
+			}
+		}
+	}
+
+	log.Printf("tasks: post-processing done processed=%d descriptions=%d tags=%d", processed, filledDescriptions, filledTags)
+	return nil
 }
 
 // ---------------------------------------------------------------------------
@@ -196,7 +311,7 @@ func (s *service) processGenerateDescription(ctx context.Context, task *Task) er
 		return fmt.Errorf("invalid payload: %w", err)
 	}
 
-	post, err := s.cfg.Store.GetPostByID(ctx, payload.PostID)
+	post, err := s.store.GetPostByID(ctx, payload.PostID)
 	if err != nil {
 		return fmt.Errorf("load post: %w", err)
 	}
@@ -209,7 +324,7 @@ func (s *service) processGenerateDescription(ctx context.Context, task *Task) er
 		return nil
 	}
 
-	settings, err := s.cfg.Store.GetAISettings(ctx)
+	settings, err := s.store.GetAISettings(ctx)
 	if err != nil {
 		return fmt.Errorf("load ai settings: %w", err)
 	}
@@ -246,7 +361,7 @@ func (s *service) processGenerateDescription(ctx context.Context, task *Task) er
 	}
 
 	post.MetaDescription = description
-	if err := s.cfg.Store.UpdatePost(ctx, post); err != nil {
+	if err := s.store.UpdatePost(ctx, post); err != nil {
 		return fmt.Errorf("update post: %w", err)
 	}
 	return nil
@@ -322,7 +437,7 @@ func (s *service) processGenerateTags(ctx context.Context, task *Task) error {
 		return fmt.Errorf("invalid payload: %w", err)
 	}
 
-	post, err := s.cfg.Store.GetPostByID(ctx, payload.PostID)
+	post, err := s.store.GetPostByID(ctx, payload.PostID)
 	if err != nil {
 		return fmt.Errorf("load post: %w", err)
 	}
@@ -331,7 +446,7 @@ func (s *service) processGenerateTags(ctx context.Context, task *Task) error {
 	}
 
 	// Skip if tags were already set.
-	tags, err := s.cfg.Store.GetPostTags(ctx, post.ID)
+	tags, err := s.store.GetPostTags(ctx, post.ID)
 	if err != nil {
 		return fmt.Errorf("load tags: %w", err)
 	}
@@ -339,7 +454,7 @@ func (s *service) processGenerateTags(ctx context.Context, task *Task) error {
 		return nil
 	}
 
-	settings, err := s.cfg.Store.GetAISettings(ctx)
+	settings, err := s.store.GetAISettings(ctx)
 	if err != nil {
 		return fmt.Errorf("load ai settings: %w", err)
 	}
@@ -375,7 +490,7 @@ func (s *service) processGenerateTags(ctx context.Context, task *Task) error {
 		return fmt.Errorf("ai returned no tags")
 	}
 
-	return s.cfg.Store.SetPostTags(ctx, post.ID, resultTags)
+	return s.store.SetPostTags(ctx, post.ID, resultTags)
 }
 
 // ---------------------------------------------------------------------------
@@ -389,10 +504,10 @@ type importImagesPayload struct {
 
 type importImagesResult struct {
 	URLMap         map[string]string `json:"url_map"`
-	ProcessedCount int              `json:"processed_count"`
-	TotalCount     int              `json:"total_count"`
-	Errors         []string         `json:"errors,omitempty"`
-	ReplacedCount  int              `json:"replaced_count"`
+	ProcessedCount int               `json:"processed_count"`
+	TotalCount     int               `json:"total_count"`
+	Errors         []string          `json:"errors,omitempty"`
+	ReplacedCount  int               `json:"replaced_count"`
 }
 
 func (s *service) processImportImages(ctx context.Context, task *Task) error {
@@ -418,44 +533,50 @@ func (s *service) processImportImages(ctx context.Context, task *Task) error {
 	}
 
 	// Gather unique image URLs from all imported posts.
-	imageURLs := map[string]bool{}
+	resolvedImages := map[string][]string{}
 	for _, postID := range payload.PostIDs {
-		post, err := s.cfg.Store.GetPostByID(ctx, postID)
+		post, err := s.store.GetPostByID(ctx, postID)
 		if err != nil || post == nil {
 			continue
 		}
-		for _, u := range extractImageURLs(post.ContentHTML, post.ContentMarkdown, payload.BaseSiteURL) {
-			imageURLs[u] = true
+		for _, candidate := range extractImageCandidates(post.ContentHTML, post.ContentMarkdown, payload.BaseSiteURL) {
+			aliases := resolvedImages[candidate.Resolved]
+			aliases = appendImageAlias(aliases, candidate.Raw)
+			aliases = appendImageAlias(aliases, candidate.Resolved)
+			resolvedImages[candidate.Resolved] = aliases
 		}
 	}
 
-	result.TotalCount = len(imageURLs)
+	result.TotalCount = len(resolvedImages)
 	log.Printf("tasks: image import found %d unique images from %d posts", result.TotalCount, len(payload.PostIDs))
 
 	// Download each image, skipping already-processed ones.
-	for imgURL := range imageURLs {
-		if _, ok := result.URLMap[imgURL]; ok {
+	for resolvedURL, aliases := range resolvedImages {
+		if _, ok := result.URLMap[resolvedURL]; ok {
 			continue // already downloaded in a previous run
 		}
 
-		newURL, err := s.downloadAndStoreImage(ctx, imgURL)
+		newURL, err := s.downloadAndStoreImage(ctx, resolvedURL)
 		if err != nil {
-			log.Printf("tasks: image download failed url=%s err=%v", imgURL, err)
-			result.Errors = append(result.Errors, fmt.Sprintf("%s: %v", imgURL, err))
+			log.Printf("tasks: image download failed url=%s err=%v", resolvedURL, err)
+			result.Errors = append(result.Errors, fmt.Sprintf("%s: %v", resolvedURL, err))
 			result.ProcessedCount++
 			s.saveTaskResult(ctx, task, result)
 			continue
 		}
 
-		log.Printf("tasks: image downloaded url=%s -> %s", imgURL, newURL)
-		result.URLMap[imgURL] = newURL
+		log.Printf("tasks: image downloaded url=%s -> %s", resolvedURL, newURL)
+		result.URLMap[resolvedURL] = newURL
+		for _, alias := range aliases {
+			result.URLMap[alias] = newURL
+		}
 		result.ProcessedCount++
 		s.saveTaskResult(ctx, task, result)
 	}
 
 	// Replace old URLs with new URLs in all imported posts.
 	for _, postID := range payload.PostIDs {
-		post, err := s.cfg.Store.GetPostByID(ctx, postID)
+		post, err := s.store.GetPostByID(ctx, postID)
 		if err != nil || post == nil {
 			continue
 		}
@@ -473,7 +594,7 @@ func (s *service) processImportImages(ctx context.Context, task *Task) error {
 		}
 
 		if changed {
-			if err := s.cfg.Store.UpdatePost(ctx, post); err != nil {
+			if err := s.store.UpdatePost(ctx, post); err != nil {
 				result.Errors = append(result.Errors, fmt.Sprintf("update post %s: %v", postID, err))
 			} else {
 				result.ReplacedCount++
@@ -536,39 +657,111 @@ func imageURLHash(imageURL string) string {
 	return hex.EncodeToString(sum[:16])
 }
 
-// extractImageURLs finds image URLs in HTML/Markdown content from the given base site.
-func extractImageURLs(html, markdown, baseSiteURL string) []string {
-	parsedBase, err := url.Parse(strings.TrimSuffix(baseSiteURL, "/"))
+type imageCandidate struct {
+	Raw      string
+	Resolved string
+}
+
+// extractImageCandidates finds image URLs in HTML/Markdown content from the given base site.
+func extractImageCandidates(html, markdown, baseSiteURL string) []imageCandidate {
+	baseSiteURL = strings.TrimSpace(baseSiteURL)
+	if baseSiteURL != "" && !strings.HasSuffix(baseSiteURL, "/") {
+		baseSiteURL += "/"
+	}
+	parsedBase, err := url.Parse(baseSiteURL)
 	if err != nil || parsedBase.Host == "" {
 		return nil
 	}
 	baseHost := parsedBase.Host
 	fullText := html + "\n" + markdown
 
-	matches := imageURLRe.FindAllString(fullText, -1)
+	var candidates []string
+	if matches := imageURLRe.FindAllString(fullText, -1); len(matches) > 0 {
+		candidates = append(candidates, matches...)
+	}
+	if matches := htmlImageSrcRe.FindAllStringSubmatch(fullText, -1); len(matches) > 0 {
+		for _, match := range matches {
+			if len(match) > 1 {
+				candidates = append(candidates, match[1])
+			}
+		}
+	}
+	if matches := markdownImageURLRe.FindAllStringSubmatch(fullText, -1); len(matches) > 0 {
+		for _, match := range matches {
+			if len(match) > 1 {
+				candidates = append(candidates, match[1])
+			}
+		}
+	}
 
 	seen := map[string]bool{}
-	var result []string
-	for _, m := range matches {
-		// Clean trailing punctuation sometimes left by regex.
-		m = strings.TrimRight(m, ".,;:!?\"')")
-		parsed, err := url.Parse(m)
-		if err != nil {
+	var result []imageCandidate
+	for _, raw := range candidates {
+		cleaned, resolved, ok := resolveImageURL(raw, parsedBase, baseHost)
+		if !ok {
 			continue
 		}
-		if parsed.Host != baseHost {
+		if seen[resolved] {
 			continue
 		}
-		if seen[m] {
-			continue
-		}
-		seen[m] = true
-		result = append(result, m)
+		seen[resolved] = true
+		result = append(result, imageCandidate{Raw: cleaned, Resolved: resolved})
 	}
 	return result
 }
 
+func resolveImageURL(raw string, base *url.URL, baseHost string) (string, string, bool) {
+	if base == nil {
+		return "", "", false
+	}
+	clean := strings.TrimSpace(strings.TrimRight(raw, ".,;:!?\"')"))
+	if clean == "" {
+		return "", "", false
+	}
+	parsed, err := url.Parse(clean)
+	if err != nil {
+		return "", "", false
+	}
+	if parsed.Scheme == "" && strings.HasPrefix(clean, "//") {
+		parsed.Scheme = base.Scheme
+	}
+	if parsed.Host == "" {
+		parsed = base.ResolveReference(parsed)
+	}
+	if parsed.Host != baseHost {
+		return "", "", false
+	}
+	if !hasImageExtension(parsed.Path) {
+		return "", "", false
+	}
+	return clean, parsed.String(), true
+}
+
+func appendImageAlias(aliases []string, value string) []string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return aliases
+	}
+	for _, existing := range aliases {
+		if existing == value {
+			return aliases
+		}
+	}
+	return append(aliases, value)
+}
+
+func hasImageExtension(pathValue string) bool {
+	switch strings.ToLower(path.Ext(pathValue)) {
+	case ".jpg", ".jpeg", ".png", ".gif", ".webp", ".svg", ".bmp", ".ico":
+		return true
+	default:
+		return false
+	}
+}
+
 var imageURLRe = regexp.MustCompile(`https?://[^\s"'<>\)]+\.(?:jpg|jpeg|png|gif|webp|svg|bmp|ico)(?:\?[^\s"'<>\)]*)?`)
+var htmlImageSrcRe = regexp.MustCompile(`(?i)src=["']([^"']+)["']`)
+var markdownImageURLRe = regexp.MustCompile(`!\[[^\]]*\]\(([^\)]+)\)`)
 
 // saveTaskResult persists intermediate progress for resumability.
 func (s *service) saveTaskResult(ctx context.Context, task *Task, result any) {
@@ -578,5 +771,5 @@ func (s *service) saveTaskResult(ctx context.Context, task *Task, result any) {
 	}
 	task.Result = string(data)
 	task.UpdatedAt = time.Now().UTC()
-	_ = s.cfg.Store.UpdateTask(ctx, task)
+	_ = s.store.UpdateTask(ctx, task)
 }

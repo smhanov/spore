@@ -170,7 +170,26 @@ func main() {
 			AuthorID:        1,
 		}
 
-		if err := store.CreatePost(ctx, post); err != nil {
+		status := "draft"
+		if post.PublishedAt != nil {
+			status = "published"
+		}
+		entity := &blog.Entity{
+			ID:          post.ID,
+			Kind:        "post",
+			Slug:        post.Slug,
+			Status:      status,
+			PublishedAt: post.PublishedAt,
+			Attrs: blog.Attributes{
+				"title":            post.Title,
+				"content_markdown": post.ContentMarkdown,
+				"content_html":     post.ContentHTML,
+				"meta_description": post.MetaDescription,
+				"author_id":        post.AuthorID,
+				"tags":             post.Tags,
+			},
+		}
+		if err := store.Save(ctx, entity); err != nil {
 			log.Printf("Failed to create post '%s': %v", post.Title, err)
 		} else {
 			fmt.Printf("Created post: %s\n", post.Title)

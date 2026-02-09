@@ -15,7 +15,7 @@ type blogSettingsPayload struct {
 }
 
 func (s *service) handleAdminGetBlogSettings(w http.ResponseWriter, r *http.Request) {
-	settings, err := s.cfg.Store.GetBlogSettings(r.Context())
+	settings, err := s.store.GetBlogSettings(r.Context())
 	if err != nil {
 		http.Error(w, "failed to load settings", http.StatusInternalServerError)
 		return
@@ -40,7 +40,7 @@ func (s *service) handleAdminUpdateBlogSettings(w http.ResponseWriter, r *http.R
 		CommentsEnabled: payload.CommentsEnabled,
 		DateDisplay:     normalizeDateDisplay(payload.DateDisplay),
 	}
-	if err := s.cfg.Store.UpdateBlogSettings(r.Context(), settings); err != nil {
+	if err := s.store.UpdateBlogSettings(r.Context(), settings); err != nil {
 		http.Error(w, "failed to update settings", http.StatusInternalServerError)
 		return
 	}
@@ -62,7 +62,7 @@ func (s *service) handleAdminListComments(w http.ResponseWriter, r *http.Request
 	}
 	status := strings.TrimSpace(r.URL.Query().Get("status"))
 
-	comments, err := s.cfg.Store.ListCommentsForModeration(r.Context(), status, limit, offset)
+	comments, err := s.store.ListCommentsForModeration(r.Context(), status, limit, offset)
 	if err != nil {
 		http.Error(w, "failed to list comments", http.StatusInternalServerError)
 		return
@@ -87,7 +87,7 @@ func (s *service) handleAdminUpdateCommentStatus(w http.ResponseWriter, r *http.
 		return
 	}
 
-	if err := s.cfg.Store.UpdateCommentStatus(r.Context(), id, status, nil); err != nil {
+	if err := s.store.UpdateCommentStatus(r.Context(), id, status, nil); err != nil {
 		http.Error(w, "failed to update status", http.StatusInternalServerError)
 		return
 	}
@@ -96,7 +96,7 @@ func (s *service) handleAdminUpdateCommentStatus(w http.ResponseWriter, r *http.
 
 func (s *service) handleAdminDeleteComment(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
-	if err := s.cfg.Store.DeleteCommentByID(r.Context(), id); err != nil {
+	if err := s.store.DeleteCommentByID(r.Context(), id); err != nil {
 		http.Error(w, "failed to delete comment", http.StatusInternalServerError)
 		return
 	}

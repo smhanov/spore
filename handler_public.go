@@ -4,8 +4,11 @@ import (
 	"hash/fnv"
 	"math/rand"
 	"net/http"
+	"os"
+	"path/filepath"
 	"regexp"
 	"strconv"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 )
@@ -16,8 +19,9 @@ var firstImageRe = regexp.MustCompile(`<img[^>]+src="([^"]+)"`)
 func (s *service) mountPublicRoutes(r chi.Router) {
 	r.Get("/", s.handleListPosts)
 	r.Get("/tag/{tagSlug}", s.handleListPostsByTag)
-	r.Get("/{slug}", s.handleViewPost)
+	r.Get("/api/images/{id}", s.handleGetImage)
 	s.mountCommentRoutes(r)
+	r.Get("/*", s.handleViewPost)
 }
 
 func (s *service) handleListPosts(w http.ResponseWriter, r *http.Request) {
@@ -34,14 +38,14 @@ func (s *service) handleListPosts(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	posts, err := s.cfg.Store.ListPublishedPosts(r.Context(), limit, offset)
+	posts, err := s.store.ListPublishedPosts(r.Context(), limit, offset)
 	if err != nil {
 		http.Error(w, "failed to list posts", http.StatusInternalServerError)
 		return
 	}
 
 	settings := resolveBlogSettings(nil)
-	if rawSettings, err := s.cfg.Store.GetBlogSettings(r.Context()); err == nil {
+	if rawSettings, err := s.store.GetBlogSettings(r.Context()); err == nil {
 		settings = resolveBlogSettings(rawSettings)
 	}
 
@@ -50,6 +54,8 @@ func (s *service) handleListPosts(w http.ResponseWriter, r *http.Request) {
 		"RoutePrefix": s.routePrefix,
 		"CustomCSS":   s.cfg.CustomCSSURLs,
 		"DateDisplay": settings.DateDisplay,
+		"Limit":       limit,
+		"NextOffset":  offset + len(posts),
 	}
 
 	s.executeTemplate(w, "list.html", data)
@@ -70,14 +76,14 @@ func (s *service) handleListPostsByTag(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	posts, err := s.cfg.Store.ListPostsByTag(r.Context(), tagSlug, limit, offset)
+	posts, err := s.store.ListPostsByTag(r.Context(), tagSlug, limit, offset)
 	if err != nil {
 		http.Error(w, "failed to list posts", http.StatusInternalServerError)
 		return
 	}
 
 	settings := resolveBlogSettings(nil)
-	if rawSettings, err := s.cfg.Store.GetBlogSettings(r.Context()); err == nil {
+	if rawSettings, err := s.store.GetBlogSettings(r.Context()); err == nil {
 		settings = resolveBlogSettings(rawSettings)
 	}
 
@@ -87,6 +93,8 @@ func (s *service) handleListPostsByTag(w http.ResponseWriter, r *http.Request) {
 		"CustomCSS":   s.cfg.CustomCSSURLs,
 		"TagSlug":     tagSlug,
 		"DateDisplay": settings.DateDisplay,
+		"Limit":       limit,
+		"NextOffset":  offset + len(posts),
 	}
 
 	s.executeTemplate(w, "list.html", data)
@@ -100,49 +108,84 @@ type RelatedPost struct {
 }
 
 func (s *service) handleViewPost(w http.ResponseWriter, r *http.Request) {
-	slug := chi.URLParam(r, "slug")
-	post, err := s.cfg.Store.GetPublishedPostBySlug(r.Context(), slug)
+	slug := chi.URLParam(r, "*")
+	post, err := s.store.GetPublishedPostBySlug(r.Context(), slug)
 	if err != nil {
 		http.Error(w, "failed to load post", http.StatusInternalServerError)
 		return
 	}
 	if post == nil {
+		if s.cfg.StaticFilePath != "" {
+			fullPath := filepath.Join(s.cfg.StaticFilePath, slug)
+			// Minimal security check to ensure we stay within StaticFilePath
+			cleaned := filepath.Clean(fullPath)
+			absStatic, _ := filepath.Abs(s.cfg.StaticFilePath)
+			absRequested, _ := filepath.Abs(cleaned)
+
+			if strings.HasPrefix(absRequested, absStatic) {
+				if info, err := os.Stat(absRequested); err == nil && !info.IsDir() {
+					http.ServeFile(w, r, absRequested)
+					return
+				}
+			}
+		}
+
 		http.NotFound(w, r)
 		return
 	}
 
 	settings := resolveBlogSettings(nil)
-	if rawSettings, err := s.cfg.Store.GetBlogSettings(r.Context()); err == nil {
+	if rawSettings, err := s.store.GetBlogSettings(r.Context()); err == nil {
 		settings = resolveBlogSettings(rawSettings)
 	}
 
 	// Load related posts
+	var finalPosts []Post
+	targetCount := 5
+
+	// 1. Try to get distinct related posts
+	rawRelated, err := s.store.GetRelatedPosts(r.Context(), post.ID, targetCount)
+	if err == nil {
+		finalPosts = append(finalPosts, rawRelated...)
+	}
+
+	// 2. If we need more, fill with random recent posts
+	if len(finalPosts) < targetCount {
+		needed := targetCount - len(finalPosts)
+		fallback, err := s.store.ListPublishedPosts(r.Context(), 50, 0)
+		if err == nil && len(fallback) > 0 {
+			// Build set of exclusion IDs (current post + already picked related)
+			exclude := make(map[string]bool)
+			exclude[post.ID] = true
+			for _, p := range finalPosts {
+				exclude[p.ID] = true
+			}
+
+			// Filter fallback candidates
+			var candidates []Post
+			for _, p := range fallback {
+				if !exclude[p.ID] {
+					candidates = append(candidates, p)
+				}
+			}
+
+			// Pick deterministic random ones from candidates
+			// We pass "" as excludeID because we already filtered
+			picks := pickDeterministicPosts(candidates, "", needed, seedForPost(post))
+			finalPosts = append(finalPosts, picks...)
+		}
+	}
+
+	// 3. Convert to RelatedPost View Models
 	var relatedPosts []RelatedPost
-	rawRelated, err := s.cfg.Store.GetRelatedPosts(r.Context(), post.ID, 4)
-	if err == nil && len(rawRelated) > 0 {
-		if err := s.cfg.Store.LoadPostsTags(r.Context(), rawRelated); err == nil {
-			for _, rp := range rawRelated {
+	if len(finalPosts) > 0 {
+		if err := s.store.LoadPostsTags(r.Context(), finalPosts); err == nil {
+			for _, rp := range finalPosts {
 				relatedPosts = append(relatedPosts, RelatedPost{
 					Post:       rp,
 					FirstImage: extractFirstImage(rp.ContentHTML),
 					Excerpt:    trimToLength(markdownToPlainText(rp.ContentMarkdown), 150),
 				})
-			}
-		}
-	} else {
-		fallback, err := s.cfg.Store.ListPublishedPosts(r.Context(), 50, 0)
-		if err == nil && len(fallback) > 0 {
-			picks := pickDeterministicPosts(fallback, post.ID, 4, seedForPost(post))
-			if len(picks) > 0 {
-				if err := s.cfg.Store.LoadPostsTags(r.Context(), picks); err == nil {
-					for _, rp := range picks {
-						relatedPosts = append(relatedPosts, RelatedPost{
-							Post:       rp,
-							FirstImage: extractFirstImage(rp.ContentHTML),
-							Excerpt:    trimToLength(markdownToPlainText(rp.ContentMarkdown), 150),
-						})
-					}
-				}
 			}
 		}
 	}

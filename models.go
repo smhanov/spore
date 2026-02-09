@@ -10,6 +10,7 @@ type Post struct {
 	ContentMarkdown string     `json:"content_markdown" db:"content_markdown"`
 	ContentHTML     string     `json:"content_html" db:"content_html"`
 	PublishedAt     *time.Time `json:"published_at" db:"published_at"`
+	UpdatedAt       *time.Time `json:"updated_at,omitempty" db:"updated_at"`
 	MetaDescription string     `json:"meta_description" db:"meta_description"`
 	AuthorID        int        `json:"author_id" db:"author_id"`
 	Tags            []Tag      `json:"tags"`
@@ -68,12 +69,12 @@ type AdminComment struct {
 
 // Task represents an asynchronous background task that can be persisted and resumed.
 type Task struct {
-	ID           string     `json:"id" db:"id"`
-	TaskType     string     `json:"task_type" db:"task_type"`
-	Status       string     `json:"status" db:"status"`
-	Payload      string     `json:"payload" db:"payload"`
-	Result       string     `json:"result" db:"result"`
-	ErrorMessage *string    `json:"error_message,omitempty" db:"error_message"`
-	CreatedAt    time.Time  `json:"created_at" db:"created_at"`
-	UpdatedAt    time.Time  `json:"updated_at" db:"updated_at"`
+	ID           string    `json:"id" db:"id"`
+	TaskType     string    `json:"task_type" db:"task_type"`
+	Status       string    `json:"status" db:"status"`
+	Payload      string    `json:"payload" db:"payload"`
+	Result       string    `json:"result" db:"result"`
+	ErrorMessage *string   `json:"error_message,omitempty" db:"error_message"`
+	CreatedAt    time.Time `json:"created_at" db:"created_at"`
+	UpdatedAt    time.Time `json:"updated_at" db:"updated_at"`
 }

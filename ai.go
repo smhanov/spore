@@ -32,7 +32,7 @@ type aiChatResponse struct {
 }
 
 func (s *service) handleAdminGetAISettings(w http.ResponseWriter, r *http.Request) {
-	settings, err := s.cfg.Store.GetAISettings(r.Context())
+	settings, err := s.store.GetAISettings(r.Context())
 	if err != nil {
 		http.Error(w, "failed to load ai settings", http.StatusInternalServerError)
 		return
@@ -53,10 +53,11 @@ func (s *service) handleAdminUpdateAISettings(w http.ResponseWriter, r *http.Req
 		http.Error(w, "invalid json", http.StatusBadRequest)
 		return
 	}
-	if err := s.cfg.Store.UpdateAISettings(r.Context(), &payload); err != nil {
+	if err := s.store.UpdateAISettings(r.Context(), &payload); err != nil {
 		http.Error(w, "failed to update ai settings", http.StatusInternalServerError)
 		return
 	}
+	s.queuePostProcessing("ai settings updated")
 	writeJSON(w, aiSettingsResponse{
 		Settings:     payload,
 		SmartEnabled: aiProviderConfigured(payload.Smart),
@@ -75,7 +76,7 @@ func (s *service) handleAdminAIChat(w http.ResponseWriter, r *http.Request) {
 		mode = "smart"
 	}
 
-	settings, err := s.cfg.Store.GetAISettings(r.Context())
+	settings, err := s.store.GetAISettings(r.Context())
 	if err != nil {
 		http.Error(w, "failed to load ai settings", http.StatusInternalServerError)
 		return
@@ -255,7 +256,7 @@ func extractJSONObject(text string) (string, bool) {
 }
 
 func (s *service) aiPreviewConfigured(ctx context.Context) (bool, bool, error) {
-	settings, err := s.cfg.Store.GetAISettings(ctx)
+	settings, err := s.store.GetAISettings(ctx)
 	if err != nil {
 		return false, false, err
 	}
@@ -304,7 +305,7 @@ func stripThinkTags(text string) string {
 }
 
 func (s *service) checkCommentSpam(ctx context.Context, comment Comment, post Post) (bool, string, error) {
-	settings, err := s.cfg.Store.GetAISettings(ctx)
+	settings, err := s.store.GetAISettings(ctx)
 	if err != nil {
 		return false, "", err
 	}
@@ -431,12 +432,12 @@ func (s *service) generatePostTags(postID string) {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
 
-		post, err := s.cfg.Store.GetPostByID(ctx, postID)
+		post, err := s.store.GetPostByID(ctx, postID)
 		if err != nil || post == nil {
 			return
 		}
 
-		settings, err := s.cfg.Store.GetAISettings(ctx)
+		settings, err := s.store.GetAISettings(ctx)
 		if err != nil {
 			return
 		}
@@ -470,7 +471,7 @@ func (s *service) generatePostTags(postID string) {
 			return
 		}
 
-		_ = s.cfg.Store.SetPostTags(ctx, postID, tags)
+		_ = s.store.SetPostTags(ctx, postID, tags)
 	}()
 }
 

@@ -5,107 +5,50 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"regexp"
 	"strings"
+	"time"
 
 	"github.com/jmoiron/sqlx"
 )
 
-// Default schema helpers developers can copy into their migrations.
-const (
-	SchemaBlogPosts = `
-CREATE TABLE IF NOT EXISTS blog_posts (
+// Default schema helper developers can copy into their migrations.
+const SchemaBlogEntities = `
+CREATE TABLE IF NOT EXISTS blog_entities (
     id TEXT PRIMARY KEY,
-    slug TEXT UNIQUE NOT NULL,
-    title TEXT NOT NULL,
-    content_markdown TEXT NOT NULL,
-    content_html TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    slug TEXT NULL,
+    status TEXT NULL,
+    owner_id TEXT NULL,
+    parent_id TEXT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NULL,
     published_at TIMESTAMP NULL,
-    meta_description TEXT,
-    author_id INTEGER NOT NULL
+    attributes JSON NOT NULL DEFAULT '{}'
 );
+CREATE INDEX IF NOT EXISTS idx_blog_entities_kind ON blog_entities(kind);
+CREATE INDEX IF NOT EXISTS idx_blog_entities_kind_slug ON blog_entities(kind, slug);
+CREATE INDEX IF NOT EXISTS idx_blog_entities_kind_status ON blog_entities(kind, status);
+CREATE INDEX IF NOT EXISTS idx_blog_entities_kind_owner ON blog_entities(kind, owner_id);
+CREATE INDEX IF NOT EXISTS idx_blog_entities_kind_parent ON blog_entities(kind, parent_id);
+CREATE INDEX IF NOT EXISTS idx_blog_entities_kind_created ON blog_entities(kind, created_at);
+CREATE INDEX IF NOT EXISTS idx_blog_entities_kind_published ON blog_entities(kind, published_at);
 `
-	SchemaBlogTags = `
-CREATE TABLE IF NOT EXISTS blog_tags (
-    id TEXT PRIMARY KEY,
-    name TEXT NOT NULL,
-    slug TEXT UNIQUE NOT NULL
-);
-`
-	SchemaBlogPostTags = `
-CREATE TABLE IF NOT EXISTS blog_post_tags (
-	post_id TEXT NOT NULL REFERENCES blog_posts(id) ON DELETE CASCADE,
-	tag_id TEXT NOT NULL REFERENCES blog_tags(id) ON DELETE CASCADE,
-	PRIMARY KEY (post_id, tag_id)
-);
-`
-	SchemaBlogAISettings = `
-CREATE TABLE IF NOT EXISTS blog_ai_settings (
-	id INTEGER PRIMARY KEY CHECK (id = 1),
-	smart_provider TEXT,
-	smart_model TEXT,
-	smart_api_key TEXT,
-	smart_base_url TEXT,
-	smart_temperature REAL,
-	smart_max_tokens INTEGER,
-	dumb_provider TEXT,
-	dumb_model TEXT,
-	dumb_api_key TEXT,
-	dumb_base_url TEXT,
-	dumb_temperature REAL,
-	dumb_max_tokens INTEGER,
-	updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
-`
-	SchemaBlogSettings = `
-CREATE TABLE IF NOT EXISTS blog_settings (
-	id INTEGER PRIMARY KEY CHECK (id = 1),
-	comments_enabled BOOLEAN NOT NULL DEFAULT TRUE,
-	date_display TEXT NOT NULL DEFAULT 'absolute',
-	updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
-`
-	SchemaBlogComments = `
-CREATE TABLE IF NOT EXISTS blog_comments (
-	id TEXT PRIMARY KEY,
-	post_id TEXT NOT NULL REFERENCES blog_posts(id) ON DELETE CASCADE,
-	parent_id TEXT NULL REFERENCES blog_comments(id) ON DELETE CASCADE,
-	author_name TEXT NOT NULL,
-	content TEXT NOT NULL,
-	status TEXT NOT NULL DEFAULT 'approved',
-	owner_token_hash TEXT NOT NULL,
-	created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-	updated_at TIMESTAMP NULL,
-	spam_checked_at TIMESTAMP NULL,
-	spam_reason TEXT NULL
-);
-CREATE INDEX IF NOT EXISTS idx_blog_comments_post_id ON blog_comments(post_id);
-CREATE INDEX IF NOT EXISTS idx_blog_comments_status ON blog_comments(status);
-CREATE INDEX IF NOT EXISTS idx_blog_comments_parent_id ON blog_comments(parent_id);
-`
-
-	SchemaBlogTasks = `
-CREATE TABLE IF NOT EXISTS blog_tasks (
-	id TEXT PRIMARY KEY,
-	task_type TEXT NOT NULL,
-	status TEXT NOT NULL DEFAULT 'pending',
-	payload TEXT NOT NULL DEFAULT '{}',
-	result TEXT NOT NULL DEFAULT '{}',
-	error_message TEXT,
-	created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-	updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
-CREATE INDEX IF NOT EXISTS idx_blog_tasks_status ON blog_tasks(status);
-`
-)
 
 // SQLXStore is a reference implementation of BlogStore using sqlx.
 type SQLXStore struct {
-	DB *sqlx.DB
+	DB       *sqlx.DB
+	Dialect  string
+	keyGuard *regexp.Regexp
 }
 
 // NewSQLXStore constructs a store backed by the provided sqlx.DB.
 func NewSQLXStore(db *sqlx.DB) *SQLXStore {
-	return &SQLXStore{DB: db}
+	return &SQLXStore{
+		DB:       db,
+		Dialect:  detectDialect(db),
+		keyGuard: regexp.MustCompile(`^[a-zA-Z0-9_]+$`),
+	}
 }
 
 // Migrate applies the built-in migrations for the SQLX store.
@@ -178,526 +121,230 @@ CREATE TABLE IF NOT EXISTS blog_migrations (
 	return nil
 }
 
-func (s *SQLXStore) GetPublishedPostBySlug(ctx context.Context, slug string) (*Post, error) {
-	var p Post
-	err := s.DB.GetContext(ctx, &p, `SELECT id, slug, title, content_markdown, content_html, published_at, meta_description, author_id FROM blog_posts WHERE slug=$1 AND published_at IS NOT NULL`, slug)
-	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return nil, nil
-		}
-		return nil, err
+// Save creates or updates an entity by ID.
+func (s *SQLXStore) Save(ctx context.Context, e *Entity) error {
+	if e == nil {
+		return fmt.Errorf("entity required")
 	}
-	tags, err := s.GetPostTags(ctx, p.ID)
-	if err != nil {
-		return nil, err
+	if strings.TrimSpace(e.Kind) == "" {
+		return fmt.Errorf("entity kind required")
 	}
-	p.Tags = tags
-	return &p, nil
-}
+	if e.ID == "" {
+		e.ID = generateID()
+	}
+	if e.Attrs == nil {
+		e.Attrs = Attributes{}
+	}
 
-func (s *SQLXStore) ListPublishedPosts(ctx context.Context, limit, offset int) ([]Post, error) {
-	posts := []Post{}
-	err := s.DB.SelectContext(ctx, &posts, `SELECT id, slug, title, content_markdown, content_html, published_at, meta_description, author_id FROM blog_posts WHERE published_at IS NOT NULL ORDER BY published_at DESC LIMIT $1 OFFSET $2`, limit, offset)
-	if err != nil {
-		return nil, err
+	createdAt := e.CreatedAt
+	if createdAt.IsZero() {
+		createdAt = time.Now().UTC()
 	}
-	if err := s.LoadPostsTags(ctx, posts); err != nil {
-		return nil, err
+	updatedAt := time.Now().UTC()
+	if e.UpdatedAt != nil {
+		updatedAt = e.UpdatedAt.UTC()
 	}
-	return posts, nil
-}
 
-func (s *SQLXStore) ListPostsByTag(ctx context.Context, tagSlug string, limit, offset int) ([]Post, error) {
-	posts := []Post{}
-	err := s.DB.SelectContext(ctx, &posts, `
-SELECT p.id, p.slug, p.title, p.content_markdown, p.content_html, p.published_at, p.meta_description, p.author_id
-FROM blog_posts p
-JOIN blog_post_tags pt ON pt.post_id = p.id
-JOIN blog_tags t ON t.id = pt.tag_id
-WHERE t.slug = $1 AND p.published_at IS NOT NULL
-ORDER BY p.published_at DESC
-LIMIT $2 OFFSET $3`, tagSlug, limit, offset)
-	if err != nil {
-		return nil, err
-	}
-	if err := s.LoadPostsTags(ctx, posts); err != nil {
-		return nil, err
-	}
-	return posts, nil
-}
+	query := `
+INSERT INTO blog_entities (id, kind, slug, status, owner_id, parent_id, created_at, updated_at, published_at, attributes)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+ON CONFLICT(id) DO UPDATE SET
+	kind = excluded.kind,
+	slug = excluded.slug,
+	status = excluded.status,
+	owner_id = excluded.owner_id,
+	parent_id = excluded.parent_id,
+	updated_at = excluded.updated_at,
+	published_at = excluded.published_at,
+	attributes = excluded.attributes
+`
+	query = s.DB.Rebind(query)
 
-func (s *SQLXStore) CreatePost(ctx context.Context, p *Post) error {
-	if p.ID == "" {
-		p.ID = generateID()
-	}
-	_, err := s.DB.ExecContext(ctx, `INSERT INTO blog_posts (id, slug, title, content_markdown, content_html, published_at, meta_description, author_id) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
-		p.ID, p.Slug, p.Title, p.ContentMarkdown, p.ContentHTML, p.PublishedAt, p.MetaDescription, p.AuthorID)
-	return err
-}
-
-func (s *SQLXStore) UpdatePost(ctx context.Context, p *Post) error {
-	_, err := s.DB.ExecContext(ctx, `UPDATE blog_posts SET slug=$1, title=$2, content_markdown=$3, content_html=$4, published_at=$5, meta_description=$6, author_id=$7 WHERE id=$8`,
-		p.Slug, p.Title, p.ContentMarkdown, p.ContentHTML, p.PublishedAt, p.MetaDescription, p.AuthorID, p.ID)
-	return err
-}
-
-func (s *SQLXStore) GetPostByID(ctx context.Context, id string) (*Post, error) {
-	var p Post
-	err := s.DB.GetContext(ctx, &p, `SELECT id, slug, title, content_markdown, content_html, published_at, meta_description, author_id FROM blog_posts WHERE id=$1`, id)
-	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return nil, nil
-		}
-		return nil, err
-	}
-	tags, err := s.GetPostTags(ctx, p.ID)
-	if err != nil {
-		return nil, err
-	}
-	p.Tags = tags
-	return &p, nil
-}
-
-func (s *SQLXStore) DeletePost(ctx context.Context, id string) error {
-	_, err := s.DB.ExecContext(ctx, `DELETE FROM blog_posts WHERE id=$1`, id)
-	return err
-}
-
-func (s *SQLXStore) ListAllPosts(ctx context.Context, limit, offset int) ([]Post, error) {
-	posts := []Post{}
-	err := s.DB.SelectContext(ctx, &posts, `SELECT id, slug, title, content_markdown, content_html, published_at, meta_description, author_id FROM blog_posts ORDER BY COALESCE(published_at, '9999-12-31') DESC LIMIT $1 OFFSET $2`, limit, offset)
-	if err != nil {
-		return nil, err
-	}
-	if err := s.LoadPostsTags(ctx, posts); err != nil {
-		return nil, err
-	}
-	return posts, nil
-}
-
-type aiSettingsRow struct {
-	ID               int      `db:"id"`
-	SmartProvider    string   `db:"smart_provider"`
-	SmartModel       string   `db:"smart_model"`
-	SmartAPIKey      string   `db:"smart_api_key"`
-	SmartBaseURL     string   `db:"smart_base_url"`
-	SmartTemperature *float64 `db:"smart_temperature"`
-	SmartMaxTokens   *int     `db:"smart_max_tokens"`
-	DumbProvider     string   `db:"dumb_provider"`
-	DumbModel        string   `db:"dumb_model"`
-	DumbAPIKey       string   `db:"dumb_api_key"`
-	DumbBaseURL      string   `db:"dumb_base_url"`
-	DumbTemperature  *float64 `db:"dumb_temperature"`
-	DumbMaxTokens    *int     `db:"dumb_max_tokens"`
-}
-
-func (s *SQLXStore) GetAISettings(ctx context.Context) (*AISettings, error) {
-	var row aiSettingsRow
-	err := s.DB.GetContext(ctx, &row, `SELECT id, smart_provider, smart_model, smart_api_key, smart_base_url, smart_temperature, smart_max_tokens, dumb_provider, dumb_model, dumb_api_key, dumb_base_url, dumb_temperature, dumb_max_tokens FROM blog_ai_settings WHERE id = 1`)
-	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return nil, nil
-		}
-		return nil, err
-	}
-	settings := &AISettings{
-		Smart: AIProviderSettings{
-			Provider:    row.SmartProvider,
-			Model:       row.SmartModel,
-			APIKey:      row.SmartAPIKey,
-			BaseURL:     row.SmartBaseURL,
-			Temperature: row.SmartTemperature,
-			MaxTokens:   row.SmartMaxTokens,
-		},
-		Dumb: AIProviderSettings{
-			Provider:    row.DumbProvider,
-			Model:       row.DumbModel,
-			APIKey:      row.DumbAPIKey,
-			BaseURL:     row.DumbBaseURL,
-			Temperature: row.DumbTemperature,
-			MaxTokens:   row.DumbMaxTokens,
-		},
-	}
-	return settings, nil
-}
-
-func (s *SQLXStore) UpdateAISettings(ctx context.Context, settings *AISettings) error {
-	if settings == nil {
-		return fmt.Errorf("ai settings required")
-	}
-	_, err := s.DB.ExecContext(ctx, `
-INSERT INTO blog_ai_settings (
-    id, smart_provider, smart_model, smart_api_key, smart_base_url, smart_temperature, smart_max_tokens,
-    dumb_provider, dumb_model, dumb_api_key, dumb_base_url, dumb_temperature, dumb_max_tokens
-) VALUES (
-    1, $1, $2, $3, $4, $5, $6,
-    $7, $8, $9, $10, $11, $12
-) ON CONFLICT(id) DO UPDATE SET
-    smart_provider = excluded.smart_provider,
-    smart_model = excluded.smart_model,
-    smart_api_key = excluded.smart_api_key,
-    smart_base_url = excluded.smart_base_url,
-    smart_temperature = excluded.smart_temperature,
-    smart_max_tokens = excluded.smart_max_tokens,
-    dumb_provider = excluded.dumb_provider,
-    dumb_model = excluded.dumb_model,
-    dumb_api_key = excluded.dumb_api_key,
-    dumb_base_url = excluded.dumb_base_url,
-    dumb_temperature = excluded.dumb_temperature,
-    dumb_max_tokens = excluded.dumb_max_tokens,
-    updated_at = CURRENT_TIMESTAMP
-`,
-		settings.Smart.Provider,
-		settings.Smart.Model,
-		settings.Smart.APIKey,
-		settings.Smart.BaseURL,
-		settings.Smart.Temperature,
-		settings.Smart.MaxTokens,
-		settings.Dumb.Provider,
-		settings.Dumb.Model,
-		settings.Dumb.APIKey,
-		settings.Dumb.BaseURL,
-		settings.Dumb.Temperature,
-		settings.Dumb.MaxTokens,
+	_, err := s.DB.ExecContext(ctx, query,
+		e.ID,
+		e.Kind,
+		nullIfEmpty(e.Slug),
+		nullIfEmpty(e.Status),
+		nullIfEmpty(e.OwnerID),
+		nullIfEmpty(e.ParentID),
+		createdAt,
+		updatedAt,
+		e.PublishedAt,
+		e.Attrs,
 	)
 	return err
 }
 
-func (s *SQLXStore) GetBlogSettings(ctx context.Context) (*BlogSettings, error) {
-	var settings BlogSettings
-	err := s.DB.GetContext(ctx, &settings, `SELECT comments_enabled, date_display FROM blog_settings WHERE id = 1`)
-	if err != nil {
+// Get retrieves a single entity by ID.
+func (s *SQLXStore) Get(ctx context.Context, id string) (*Entity, error) {
+	if strings.TrimSpace(id) == "" {
+		return nil, nil
+	}
+	var entity Entity
+	query := `SELECT id, kind, slug, status, owner_id, parent_id, created_at, updated_at, published_at, attributes FROM blog_entities WHERE id = ?`
+	query = s.DB.Rebind(query)
+	if err := s.DB.GetContext(ctx, &entity, query, id); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, nil
 		}
 		return nil, err
 	}
-	if settings.DateDisplay == "" {
-		settings.DateDisplay = "absolute"
-	}
-	return &settings, nil
+	return &entity, nil
 }
 
-func (s *SQLXStore) UpdateBlogSettings(ctx context.Context, settings *BlogSettings) error {
-	if settings == nil {
-		return fmt.Errorf("blog settings required")
-	}
-	_, err := s.DB.ExecContext(ctx, `
-INSERT INTO blog_settings (id, comments_enabled, date_display)
-VALUES (1, $1, $2)
-ON CONFLICT(id) DO UPDATE SET
-    comments_enabled = excluded.comments_enabled,
-    date_display = excluded.date_display,
-    updated_at = CURRENT_TIMESTAMP
-`, settings.CommentsEnabled, settings.DateDisplay)
-	return err
-}
+// Find retrieves entities matching a query.
+func (s *SQLXStore) Find(ctx context.Context, q Query) ([]*Entity, error) {
+	baseQuery := `SELECT id, kind, slug, status, owner_id, parent_id, created_at, updated_at, published_at, attributes FROM blog_entities`
+	var conditions []string
+	var args []interface{}
 
-func (s *SQLXStore) CreateComment(ctx context.Context, c *Comment) error {
-	if c == nil {
-		return fmt.Errorf("comment required")
-	}
-	if c.ID == "" {
-		c.ID = generateID()
-	}
-	if c.Status == "" {
-		c.Status = "approved"
-	}
-	_, err := s.DB.ExecContext(ctx, `
-INSERT INTO blog_comments (
-    id, post_id, parent_id, author_name, content, status, owner_token_hash
-) VALUES ($1,$2,$3,$4,$5,$6,$7)
-`, c.ID, c.PostID, c.ParentID, c.AuthorName, c.Content, c.Status, c.OwnerTokenHash)
-	return err
-}
-
-func (s *SQLXStore) GetCommentByID(ctx context.Context, id string) (*Comment, error) {
-	var c Comment
-	err := s.DB.GetContext(ctx, &c, `
-SELECT id, post_id, parent_id, author_name, content, status, owner_token_hash, created_at, updated_at, spam_checked_at, spam_reason
-FROM blog_comments WHERE id = $1`, id)
-	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return nil, nil
-		}
-		return nil, err
-	}
-	return &c, nil
-}
-
-func (s *SQLXStore) ListCommentsByPost(ctx context.Context, postID string) ([]Comment, error) {
-	comments := []Comment{}
-	err := s.DB.SelectContext(ctx, &comments, `
-SELECT id, post_id, parent_id, author_name, content, status, owner_token_hash, created_at, updated_at, spam_checked_at, spam_reason
-FROM blog_comments WHERE post_id = $1
-ORDER BY created_at ASC`, postID)
-	if err != nil {
-		return nil, err
-	}
-	return comments, nil
-}
-
-func (s *SQLXStore) UpdateCommentContentByOwner(ctx context.Context, id, ownerTokenHash, content string) (bool, error) {
-	res, err := s.DB.ExecContext(ctx, `
-UPDATE blog_comments
-SET content = $1, updated_at = CURRENT_TIMESTAMP
-WHERE id = $2 AND owner_token_hash = $3 AND status != 'rejected'
-`, content, id, ownerTokenHash)
-	if err != nil {
-		return false, err
-	}
-	rows, err := res.RowsAffected()
-	if err != nil {
-		return false, err
-	}
-	return rows > 0, nil
-}
-
-func (s *SQLXStore) DeleteCommentByOwner(ctx context.Context, id, ownerTokenHash string) (bool, error) {
-	res, err := s.DB.ExecContext(ctx, `DELETE FROM blog_comments WHERE id = $1 AND owner_token_hash = $2`, id, ownerTokenHash)
-	if err != nil {
-		return false, err
-	}
-	rows, err := res.RowsAffected()
-	if err != nil {
-		return false, err
-	}
-	return rows > 0, nil
-}
-
-func (s *SQLXStore) UpdateCommentStatus(ctx context.Context, id, status string, spamReason *string) error {
-	_, err := s.DB.ExecContext(ctx, `
-UPDATE blog_comments
-SET status = $1,
-    spam_reason = $2,
-    updated_at = CURRENT_TIMESTAMP,
-    spam_checked_at = CASE WHEN $1 IN ('approved', 'rejected') THEN CURRENT_TIMESTAMP ELSE spam_checked_at END
-WHERE id = $3
-`, status, spamReason, id)
-	return err
-}
-
-func (s *SQLXStore) ListCommentsForModeration(ctx context.Context, status string, limit, offset int) ([]AdminComment, error) {
-	comments := []AdminComment{}
-	query := `
-SELECT c.id, c.post_id, c.parent_id, c.author_name, c.content, c.status, c.owner_token_hash, c.created_at, c.updated_at, c.spam_checked_at, c.spam_reason,
-       p.title AS post_title, p.slug AS post_slug
-FROM blog_comments c
-JOIN blog_posts p ON p.id = c.post_id`
-	args := []any{}
-	if strings.TrimSpace(status) != "" {
-		query += " WHERE c.status = $1"
-		args = append(args, status)
-	}
-	query += " ORDER BY c.created_at DESC LIMIT $" + fmt.Sprintf("%d", len(args)+1) + " OFFSET $" + fmt.Sprintf("%d", len(args)+2)
-	args = append(args, limit, offset)
-
-	err := s.DB.SelectContext(ctx, &comments, query, args...)
-	if err != nil {
-		return nil, err
-	}
-	return comments, nil
-}
-
-func (s *SQLXStore) DeleteCommentByID(ctx context.Context, id string) error {
-	_, err := s.DB.ExecContext(ctx, `DELETE FROM blog_comments WHERE id = $1`, id)
-	return err
-}
-
-// SetPostTags replaces all tags for a post. Creates new tags as needed.
-func (s *SQLXStore) SetPostTags(ctx context.Context, postID string, tagNames []string) error {
-	tx, err := s.DB.BeginTxx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	defer func() {
-		if err != nil {
-			_ = tx.Rollback()
-		}
-	}()
-
-	// Remove existing tags for the post
-	if _, err = tx.ExecContext(ctx, `DELETE FROM blog_post_tags WHERE post_id = $1`, postID); err != nil {
-		return err
+	if strings.TrimSpace(q.Kind) != "" {
+		conditions = append(conditions, "kind = ?")
+		args = append(args, q.Kind)
 	}
 
-	for _, name := range tagNames {
-		name = strings.TrimSpace(name)
-		if name == "" {
+	promotedCols := map[string]bool{
+		"id":           true,
+		"kind":         true,
+		"slug":         true,
+		"status":       true,
+		"owner_id":     true,
+		"parent_id":    true,
+		"created_at":   true,
+		"updated_at":   true,
+		"published_at": true,
+	}
+
+	for key, val := range q.Filter {
+		if promotedCols[key] {
+			if val == nil {
+				conditions = append(conditions, fmt.Sprintf("%s IS NULL", key))
+				continue
+			}
+			conditions = append(conditions, fmt.Sprintf("%s = ?", key))
+			args = append(args, val)
 			continue
 		}
-		slug := tagSlug(name)
-
-		// Upsert the tag
-		var tagID string
-		err = tx.GetContext(ctx, &tagID, `SELECT id FROM blog_tags WHERE slug = $1`, slug)
-		if err != nil {
-			tagID = generateID()
-			if _, err = tx.ExecContext(ctx, `INSERT INTO blog_tags (id, name, slug) VALUES ($1, $2, $3)`, tagID, name, slug); err != nil {
-				return err
-			}
+		if !s.validKey(key) {
+			return nil, fmt.Errorf("invalid filter key: %s", key)
 		}
-
-		// Link tag to post
-		if _, err = tx.ExecContext(ctx, `INSERT INTO blog_post_tags (post_id, tag_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`, postID, tagID); err != nil {
-			return err
+		expr := s.jsonExtractExpr(key)
+		if val == nil {
+			conditions = append(conditions, fmt.Sprintf("%s IS NULL", expr))
+			continue
 		}
+		conditions = append(conditions, fmt.Sprintf("%s = ?", expr))
+		args = append(args, val)
 	}
 
-	return tx.Commit()
-}
+	fullQuery := baseQuery
+	if len(conditions) > 0 {
+		fullQuery += " WHERE " + strings.Join(conditions, " AND ")
+	}
 
-// GetPostTags returns all tags for a given post.
-func (s *SQLXStore) GetPostTags(ctx context.Context, postID string) ([]Tag, error) {
-	tags := []Tag{}
-	err := s.DB.SelectContext(ctx, &tags, `
-SELECT t.id, t.name, t.slug
-FROM blog_tags t
-JOIN blog_post_tags pt ON pt.tag_id = t.id
-WHERE pt.post_id = $1
-ORDER BY t.name`, postID)
-	if err != nil {
+	if orderBy := sanitizeOrderBy(q.OrderBy); orderBy != "" {
+		fullQuery += " ORDER BY " + orderBy
+	} else {
+		fullQuery += " ORDER BY created_at DESC"
+	}
+
+	limit := q.Limit
+	if limit <= 0 {
+		limit = 200
+	}
+	offset := q.Offset
+	if offset < 0 {
+		offset = 0
+	}
+	fullQuery += " LIMIT ? OFFSET ?"
+	args = append(args, limit, offset)
+	fullQuery = s.DB.Rebind(fullQuery)
+
+	var entities []*Entity
+	if err := s.DB.SelectContext(ctx, &entities, fullQuery, args...); err != nil {
 		return nil, err
 	}
-	return tags, nil
+	return entities, nil
 }
 
-// LoadPostsTags populates the Tags field on each post in the slice.
-func (s *SQLXStore) LoadPostsTags(ctx context.Context, posts []Post) error {
-	if len(posts) == 0 {
+// Delete removes an entity by ID.
+func (s *SQLXStore) Delete(ctx context.Context, id string) error {
+	if strings.TrimSpace(id) == "" {
 		return nil
 	}
-	ids := make([]string, len(posts))
-	for i, p := range posts {
-		ids[i] = p.ID
-	}
-
-	type postTag struct {
-		PostID string `db:"post_id"`
-		Tag
-	}
-
-	query, args, err := sqlx.In(`
-SELECT pt.post_id, t.id, t.name, t.slug
-FROM blog_tags t
-JOIN blog_post_tags pt ON pt.tag_id = t.id
-WHERE pt.post_id IN (?)
-ORDER BY t.name`, ids)
-	if err != nil {
-		return err
-	}
+	query := `DELETE FROM blog_entities WHERE id = ?`
 	query = s.DB.Rebind(query)
+	_, err := s.DB.ExecContext(ctx, query, id)
+	return err
+}
 
-	var rows []postTag
-	if err := s.DB.SelectContext(ctx, &rows, query, args...); err != nil {
-		return err
+func (s *SQLXStore) validKey(key string) bool {
+	if s == nil || s.keyGuard == nil {
+		return false
 	}
+	return s.keyGuard.MatchString(key)
+}
 
-	tagMap := map[string][]Tag{}
-	for _, r := range rows {
-		tagMap[r.PostID] = append(tagMap[r.PostID], r.Tag)
+func (s *SQLXStore) jsonExtractExpr(key string) string {
+	if strings.HasPrefix(strings.ToLower(s.Dialect), "postgres") || strings.HasPrefix(strings.ToLower(s.Dialect), "pgx") {
+		return fmt.Sprintf("attributes ->> '%s'", key)
 	}
-	for i := range posts {
-		posts[i].Tags = tagMap[posts[i].ID]
-		if posts[i].Tags == nil {
-			posts[i].Tags = []Tag{}
+	return fmt.Sprintf("json_extract(attributes, '$.%s')", key)
+}
+
+func detectDialect(db *sqlx.DB) string {
+	if db == nil {
+		return "sqlite"
+	}
+	type driverNamer interface {
+		DriverName() string
+	}
+	if namer, ok := interface{}(db).(driverNamer); ok {
+		return namer.DriverName()
+	}
+	return "sqlite"
+}
+
+func sanitizeOrderBy(order string) string {
+	fields := strings.Fields(strings.TrimSpace(order))
+	if len(fields) == 0 {
+		return ""
+	}
+	if len(fields) > 2 {
+		return ""
+	}
+	field := strings.ToLower(fields[0])
+	allowed := map[string]bool{
+		"id":           true,
+		"kind":         true,
+		"slug":         true,
+		"status":       true,
+		"owner_id":     true,
+		"parent_id":    true,
+		"created_at":   true,
+		"updated_at":   true,
+		"published_at": true,
+	}
+	if !allowed[field] {
+		return ""
+	}
+	direction := "ASC"
+	if len(fields) == 2 {
+		switch strings.ToUpper(fields[1]) {
+		case "ASC", "DESC":
+			direction = strings.ToUpper(fields[1])
+		default:
+			return ""
 		}
 	}
-	return nil
+	return field + " " + direction
 }
 
-// GetRelatedPosts finds posts related to the given post based on shared tags.
-func (s *SQLXStore) GetRelatedPosts(ctx context.Context, postID string, limit int) ([]Post, error) {
-	posts := []Post{}
-	err := s.DB.SelectContext(ctx, &posts, `
-SELECT p.id, p.slug, p.title, p.content_markdown, p.content_html, p.published_at, p.meta_description, p.author_id
-FROM blog_posts p
-JOIN blog_post_tags pt ON pt.post_id = p.id
-JOIN blog_post_tags pt2 ON pt2.tag_id = pt.tag_id AND pt2.post_id = $1
-WHERE p.id != $1 AND p.published_at IS NOT NULL
-GROUP BY p.id
-ORDER BY COUNT(pt.tag_id) DESC, p.published_at DESC
-LIMIT $2`, postID, limit)
-	if err != nil {
-		return nil, err
+func nullIfEmpty(value string) interface{} {
+	if strings.TrimSpace(value) == "" {
+		return nil
 	}
-	return posts, nil
-}
-
-// --- Task store methods ---
-
-func (s *SQLXStore) CreateTask(ctx context.Context, task *Task) error {
-	if task.ID == "" {
-		task.ID = generateID()
-	}
-	if task.Status == "" {
-		task.Status = "pending"
-	}
-	if task.Payload == "" {
-		task.Payload = "{}"
-	}
-	if task.Result == "" {
-		task.Result = "{}"
-	}
-	_, err := s.DB.ExecContext(ctx, `
-INSERT INTO blog_tasks (id, task_type, status, payload, result, error_message)
-VALUES ($1, $2, $3, $4, $5, $6)`,
-		task.ID, task.TaskType, task.Status, task.Payload, task.Result, task.ErrorMessage)
-	return err
-}
-
-func (s *SQLXStore) GetTask(ctx context.Context, id string) (*Task, error) {
-	var task Task
-	err := s.DB.GetContext(ctx, &task, `
-SELECT id, task_type, status, payload, result, error_message, created_at, updated_at
-FROM blog_tasks WHERE id = $1`, id)
-	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return nil, nil
-		}
-		return nil, err
-	}
-	return &task, nil
-}
-
-func (s *SQLXStore) ListPendingTasks(ctx context.Context) ([]Task, error) {
-	tasks := []Task{}
-	err := s.DB.SelectContext(ctx, &tasks, `
-SELECT id, task_type, status, payload, result, error_message, created_at, updated_at
-FROM blog_tasks WHERE status = 'pending'
-ORDER BY created_at ASC LIMIT 50`)
-	if err != nil {
-		return nil, err
-	}
-	return tasks, nil
-}
-
-func (s *SQLXStore) ListRecentTasks(ctx context.Context, limit int) ([]Task, error) {
-	tasks := []Task{}
-	err := s.DB.SelectContext(ctx, &tasks, `
-SELECT id, task_type, status, payload, result, error_message, created_at, updated_at
-FROM blog_tasks
-ORDER BY created_at DESC LIMIT $1`, limit)
-	if err != nil {
-		return nil, err
-	}
-	return tasks, nil
-}
-
-func (s *SQLXStore) UpdateTask(ctx context.Context, task *Task) error {
-	_, err := s.DB.ExecContext(ctx, `
-UPDATE blog_tasks
-SET status = $1, result = $2, error_message = $3, updated_at = $4
-WHERE id = $5`,
-		task.Status, task.Result, task.ErrorMessage, task.UpdatedAt, task.ID)
-	return err
-}
-
-func (s *SQLXStore) ResetRunningTasks(ctx context.Context) error {
-	_, err := s.DB.ExecContext(ctx, `
-UPDATE blog_tasks SET status = 'pending', updated_at = CURRENT_TIMESTAMP
-WHERE status = 'running'`)
-	return err
+	return value
 }
 
 // tagSlug converts a tag name to a URL-friendly slug.

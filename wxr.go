@@ -122,6 +122,7 @@ type wxrImport struct {
 
 type wxrImportChannel struct {
 	BaseSiteURL string          `xml:"http://wordpress.org/export/1.2/ base_site_url"`
+	BaseBlogURL string          `xml:"http://wordpress.org/export/1.2/ base_blog_url"`
 	Items       []wxrImportItem `xml:"item"`
 }
 
@@ -184,7 +185,7 @@ func (s *service) handleAdminExportWXR(w http.ResponseWriter, r *http.Request) {
 	}
 
 	settings := resolveBlogSettings(nil)
-	if rawSettings, err := s.cfg.Store.GetBlogSettings(r.Context()); err == nil {
+	if rawSettings, err := s.store.GetBlogSettings(r.Context()); err == nil {
 		settings = resolveBlogSettings(rawSettings)
 	}
 	commentStatus := "open"
@@ -244,7 +245,7 @@ func (s *service) handleAdminExportWXR(w http.ResponseWriter, r *http.Request) {
 			})
 		}
 
-		comments, err := s.cfg.Store.ListCommentsByPost(r.Context(), post.ID)
+		comments, err := s.store.ListCommentsByPost(r.Context(), post.ID)
 		if err != nil {
 			http.Error(w, "failed to load comments", http.StatusInternalServerError)
 			return
@@ -367,12 +368,9 @@ func (s *service) handleAdminImportWXR(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Queue background tasks for imported posts.
-	for _, postID := range result.postsNeedingDescriptions {
-		s.queueDescriptionGeneration(postID)
-	}
-	for _, postID := range result.postsNeedingTags {
-		s.queueTagGeneration(postID)
+	// Queue background task to enrich imported posts.
+	if len(result.importedPostIDs) > 0 {
+		s.queuePostProcessing("wxr import")
 	}
 	if result.baseSiteURL != "" && s.cfg.ImageStore != nil && len(result.importedPostIDs) > 0 {
 		s.queueImageImport(result.baseSiteURL, result.importedPostIDs)
@@ -400,8 +398,12 @@ func (s *service) importWXR(ctx context.Context, payload []byte) (wxrImportResul
 		}
 	}
 
+	baseSiteURL := strings.TrimSpace(doc.Channel.BaseBlogURL)
+	if baseSiteURL == "" {
+		baseSiteURL = strings.TrimSpace(doc.Channel.BaseSiteURL)
+	}
 	result := wxrImportResult{
-		baseSiteURL: strings.TrimSpace(doc.Channel.BaseSiteURL),
+		baseSiteURL: baseSiteURL,
 	}
 	for _, item := range doc.Channel.Items {
 		postType := strings.ToLower(strings.TrimSpace(item.PostType))
@@ -437,9 +439,9 @@ func (s *service) importWXR(ctx context.Context, payload []byte) (wxrImportResul
 			if postDate.IsZero() {
 				postDate = parseWXRDate(item.PostDate)
 			}
-			status := strings.ToLower(strings.TrimSpace(item.Status))
+			status := normalizeWXRPostStatus(item.Status)
 			var publishedAt *time.Time
-			if status == "publish" || status == "published" {
+			if status == "publish" {
 				if postDate.IsZero() {
 					now := time.Now().UTC()
 					postDate = now
@@ -463,7 +465,7 @@ func (s *service) importWXR(ctx context.Context, payload []byte) (wxrImportResul
 				AuthorID:        defaultImportAuthorID(s.cfg.ImportAuthorID),
 			}
 
-			if err := s.cfg.Store.CreatePost(ctx, &post); err != nil {
+			if err := s.store.CreatePost(ctx, &post); err != nil {
 				return result, fmt.Errorf("create post: %w", err)
 			}
 			result.PostsAdded++
@@ -476,7 +478,7 @@ func (s *service) importWXR(ctx context.Context, payload []byte) (wxrImportResul
 
 			tagNames := uniqueTagNames(item.Categories)
 			if len(tagNames) > 0 {
-				if err := s.cfg.Store.SetPostTags(ctx, post.ID, tagNames); err != nil {
+				if err := s.store.SetPostTags(ctx, post.ID, tagNames); err != nil {
 					return result, fmt.Errorf("set tags: %w", err)
 				}
 			} else if strings.TrimSpace(post.ContentMarkdown) != "" {
@@ -488,7 +490,7 @@ func (s *service) importWXR(ctx context.Context, payload []byte) (wxrImportResul
 			continue
 		}
 
-		existingComments, err := s.cfg.Store.ListCommentsByPost(ctx, targetPost.ID)
+		existingComments, err := s.store.ListCommentsByPost(ctx, targetPost.ID)
 		if err != nil {
 			return result, fmt.Errorf("load comments: %w", err)
 		}
@@ -505,7 +507,11 @@ func (s *service) importWXR(ctx context.Context, payload []byte) (wxrImportResul
 			if createdAt.IsZero() {
 				createdAt = parseWXRDate(comment.CommentDate)
 			}
-			key := commentKey(comment.CommentAuthor, comment.CommentContent, createdAt)
+			commentContent := strings.TrimSpace(comment.CommentContent)
+			if md, err := htmlToMarkdown(commentContent); err == nil && strings.TrimSpace(md) != "" {
+				commentContent = md
+			}
+			key := commentKey(comment.CommentAuthor, commentContent, createdAt)
 			if commentKeys[key] {
 				result.CommentsSkipped++
 				continue
@@ -516,13 +522,13 @@ func (s *service) importWXR(ctx context.Context, payload []byte) (wxrImportResul
 				PostID:         targetPost.ID,
 				ParentID:       nil,
 				AuthorName:     strings.TrimSpace(comment.CommentAuthor),
-				Content:        strings.TrimSpace(comment.CommentContent),
+				Content:        commentContent,
 				Status:         importCommentStatus(comment.CommentApproved),
 				OwnerTokenHash: hashToken(generateToken()),
 				CreatedAt:      ensureCommentTime(createdAt),
 			}
 
-			if err := s.cfg.Store.CreateComment(ctx, &newComment); err != nil {
+			if err := s.store.CreateComment(ctx, &newComment); err != nil {
 				return result, fmt.Errorf("create comment: %w", err)
 			}
 			result.CommentsAdded++
@@ -546,7 +552,11 @@ func (s *service) importWXR(ctx context.Context, payload []byte) (wxrImportResul
 			if createdAt.IsZero() {
 				createdAt = parseWXRDate(comment.CommentDate)
 			}
-			key := commentKey(comment.CommentAuthor, comment.CommentContent, createdAt)
+			commentContent := strings.TrimSpace(comment.CommentContent)
+			if md, err := htmlToMarkdown(commentContent); err == nil && strings.TrimSpace(md) != "" {
+				commentContent = md
+			}
+			key := commentKey(comment.CommentAuthor, commentContent, createdAt)
 			if commentKeys[key] {
 				result.CommentsSkipped++
 				continue
@@ -557,13 +567,13 @@ func (s *service) importWXR(ctx context.Context, payload []byte) (wxrImportResul
 				PostID:         targetPost.ID,
 				ParentID:       &mappedParent,
 				AuthorName:     strings.TrimSpace(comment.CommentAuthor),
-				Content:        strings.TrimSpace(comment.CommentContent),
+				Content:        commentContent,
 				Status:         importCommentStatus(comment.CommentApproved),
 				OwnerTokenHash: hashToken(generateToken()),
 				CreatedAt:      ensureCommentTime(createdAt),
 			}
 
-			if err := s.cfg.Store.CreateComment(ctx, &newComment); err != nil {
+			if err := s.store.CreateComment(ctx, &newComment); err != nil {
 				return result, fmt.Errorf("create comment: %w", err)
 			}
 			result.CommentsAdded++
@@ -646,6 +656,17 @@ func importCommentStatus(value string) string {
 		return "pending"
 	default:
 		return "pending"
+	}
+}
+
+func normalizeWXRPostStatus(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "publish", "published":
+		return "publish"
+	case "draft", "pending", "private", "inherit":
+		return "draft"
+	default:
+		return "draft"
 	}
 }
 
@@ -815,7 +836,7 @@ func (s *service) listAllPosts(ctx context.Context) ([]Post, error) {
 	offset := 0
 	var out []Post
 	for {
-		posts, err := s.cfg.Store.ListAllPosts(ctx, limit, offset)
+		posts, err := s.store.ListAllPosts(ctx, limit, offset)
 		if err != nil {
 			return nil, err
 		}
