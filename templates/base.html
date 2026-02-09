@@ -72,6 +72,7 @@
     {{end}}
   {{end}}
 
+  {{if .FeedURL}}<link rel="alternate" type="application/rss+xml" title="{{if .SiteTitle}}{{.SiteTitle}}{{else}}Blog{{end}} RSS Feed" href="{{.FeedURL}}">{{end}}
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/modern-normalize/modern-normalize.css">
   {{range .CustomCSS}}
     <link rel="stylesheet" href="{{.}}">

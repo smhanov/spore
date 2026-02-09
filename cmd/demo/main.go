@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"encoding/xml"
 	"flag"
 	"fmt"
 	"log"
@@ -275,14 +276,67 @@ func main() {
 		RoutePrefix:         "/blog",
 		AdminAuthMiddleware: auth,
 		CustomCSSURLs:       []string{},
+		SiteURL:             fmt.Sprintf("http://localhost:%d", *port),
+		SiteTitle:           "Spore Demo",
 	})
 	if err != nil {
 		log.Fatal(err)
 	}
 
+	// Top-level mux: serve /sitemap.xml at the root, delegate everything else to the blog handler.
+	mux := http.NewServeMux()
+	mux.HandleFunc("/sitemap.xml", func(w http.ResponseWriter, r *http.Request) {
+		serveSitemap(w, r, handler)
+	})
+	mux.Handle("/", handler)
+
 	addr := fmt.Sprintf(":%d", *port)
 	fmt.Printf("Serving blog at http://localhost:%d/blog\n", *port)
-	if err := http.ListenAndServe(addr, handler); err != nil {
+	fmt.Printf("Sitemap at http://localhost:%d/sitemap.xml\n", *port)
+	if err := http.ListenAndServe(addr, mux); err != nil {
 		log.Fatal(err)
+	}
+}
+
+// sitemapURLSet is the top-level <urlset> element.
+type sitemapURLSet struct {
+	XMLName xml.Name     `xml:"urlset"`
+	XMLNS   string       `xml:"xmlns,attr"`
+	URLs    []sitemapURL `xml:"url"`
+}
+
+// sitemapURL is a single <url> entry.
+type sitemapURL struct {
+	Loc     string `xml:"loc"`
+	LastMod string `xml:"lastmod,omitempty"`
+}
+
+func serveSitemap(w http.ResponseWriter, r *http.Request, h *blog.Handler) {
+	entries, err := h.SitemapEntries(r.Context())
+	if err != nil {
+		http.Error(w, "failed to build sitemap", http.StatusInternalServerError)
+		return
+	}
+
+	var urls []sitemapURL
+	for _, e := range entries {
+		u := sitemapURL{Loc: e.Loc}
+		if e.LastMod != nil {
+			u.LastMod = e.LastMod.UTC().Format(time.RFC3339)
+		}
+		urls = append(urls, u)
+	}
+
+	doc := sitemapURLSet{
+		XMLNS: "http://www.sitemaps.org/schemas/sitemap/0.9",
+		URLs:  urls,
+	}
+
+	w.Header().Set("Content-Type", "application/xml; charset=utf-8")
+	w.Write([]byte(xml.Header))
+	enc := xml.NewEncoder(w)
+	enc.Indent("", "  ")
+	if err := enc.Encode(doc); err != nil {
+		http.Error(w, "failed to encode sitemap", http.StatusInternalServerError)
 	}
 }

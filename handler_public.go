@@ -18,6 +18,7 @@ var firstImageRe = regexp.MustCompile(`<img[^>]+src="([^"]+)"`)
 
 func (s *service) mountPublicRoutes(r chi.Router) {
 	r.Get("/", s.handleListPosts)
+	r.Get("/feed", s.handleRSSFeed)
 	r.Get("/tag/{tagSlug}", s.handleListPostsByTag)
 	r.Get("/api/images/{id}", s.handleGetImage)
 	s.mountCommentRoutes(r)
@@ -60,6 +61,7 @@ func (s *service) handleListPosts(w http.ResponseWriter, r *http.Request) {
 		"SiteURL":         s.cfg.SiteURL,
 		"SiteDescription": s.effectiveDescription(settings),
 		"CanonicalURL":    s.canonicalURL("/"),
+		"FeedURL":         s.canonicalURL("/feed"),
 	}
 
 	s.executeTemplate(w, "list.html", data)
@@ -103,6 +105,7 @@ func (s *service) handleListPostsByTag(w http.ResponseWriter, r *http.Request) {
 		"SiteURL":         s.cfg.SiteURL,
 		"SiteDescription": s.effectiveDescription(settings),
 		"CanonicalURL":    s.canonicalURL("/tag/" + tagSlug),
+		"FeedURL":         s.canonicalURL("/feed"),
 	}
 
 	s.executeTemplate(w, "list.html", data)
@@ -212,6 +215,7 @@ func (s *service) handleViewPost(w http.ResponseWriter, r *http.Request) {
 		"SiteDescription": s.effectiveDescription(settings),
 		"CanonicalURL":    s.canonicalURL("/" + post.Slug),
 		"FirstImage":      s.resolveImageURL(firstImage),
+		"FeedURL":         s.canonicalURL("/feed"),
 	}
 
 	s.executeTemplate(w, "post.html", data)

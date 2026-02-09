@@ -13,6 +13,8 @@ Spore is a drop-in blogging handler for Go web apps. It renders public pages wit
 - Public comments with one-level replies, @mentions, and owner-only edit/delete
 - Admin moderation tools with instant hide/delete
 - WXR (WordPress eXtended RSS) import and export
+- RSS 2.0 feed with autodiscovery
+- Sitemap integration for SEO
 - Configurable date display (absolute or approximate)
 
 ## Table of Contents
@@ -24,6 +26,8 @@ Spore is a drop-in blogging handler for Go web apps. It renders public pages wit
 - [Related Posts](#related-posts)
 - [Comments](#comments)
 - [Date Display](#date-display)
+- [RSS Feed](#rss-feed)
+- [Sitemap](#sitemap)
 - [WXR Import / Export](#wxr-import--export)
 - [Implementing the BlogStore Interface](#implementing-the-blogstore-interface)
 - [Image Storage](#image-storage)
@@ -221,6 +225,44 @@ The admin UI provides a moderation queue where you can approve, hide, reject, or
 ## Date Display
 
 Posts can show either absolute dates ("Published Jan 2, 2006") or approximate dates ("Published 3 days ago"). This is configurable in the admin Settings page via the `date_display` field. The default is `"absolute"`.
+
+## RSS Feed
+
+Spore automatically serves an RSS 2.0 feed at `<prefix>/feed` (e.g., `/blog/feed`). The feed includes the 20 most recent published posts with titles, permalinks, descriptions, publication dates, and tags as categories.
+
+A `<link rel="alternate">` autodiscovery tag is automatically injected into every public page's `<head>`, so RSS readers can find the feed by visiting any blog page.
+
+The feed uses `SiteURL`, `SiteTitle`, `SiteDescription`, and `SiteLanguage` from your `Config` for metadata. If `SiteURL` is not set, it derives the base URL from the incoming request.
+
+## Sitemap
+
+Spore provides a `SitemapEntries` method on the `*Handler` returned by `NewHandler`. This lets you merge blog URLs into your application's own `sitemap.xml` without serving a separate blog-specific sitemap.
+
+```go
+blogHandler, err := blog.NewHandler(blog.Config{
+    Store:   store,
+    SiteURL: "https://example.com",
+    // ...
+})
+
+// In your sitemap.xml handler:
+entries, err := blogHandler.SitemapEntries(r.Context())
+for _, e := range entries {
+    // e.Loc     = "https://example.com/blog/my-post"
+    // e.LastMod = &time.Time{...} (or nil)
+}
+```
+
+Each `SitemapEntry` has:
+
+| Field     | Type         | Description                                          |
+| --------- | ------------ | ---------------------------------------------------- |
+| `Loc`     | `string`     | Absolute URL of the page                             |
+| `LastMod` | `*time.Time` | Last modification time (`UpdatedAt` or `PublishedAt`)|
+
+The method returns an entry for the blog index page plus one entry per published post.
+
+See the demo in `cmd/demo` for a complete working example that serves `/sitemap.xml` at the site root.
 
 ## WXR Import / Export
 
@@ -480,6 +522,7 @@ map[string]any{
     "SiteURL":         string,      // From Config.SiteURL
     "SiteDescription": string,      // From Config.SiteDescription
     "CanonicalURL":    string,      // Full canonical URL for the page
+    "FeedURL":        string,      // Absolute URL of the RSS feed
 }
 ```
 
@@ -498,6 +541,7 @@ map[string]any{
     "SiteDescription": string,        // From Config.SiteDescription
     "CanonicalURL":    string,        // Full canonical URL for the post
     "FirstImage":      string,        // Absolute URL of first image in post (for og:image)
+    "FeedURL":        string,        // Absolute URL of the RSS feed
 }
 ```
 
@@ -552,6 +596,7 @@ The build output in `frontend/dist` is automatically embedded when you build you
 | Method | Path                       | Description                                           |
 | ------ | -------------------------- | ----------------------------------------------------- |
 | GET    | `<prefix>/`                | List published posts (`?limit=N&offset=N`)            |
+| GET    | `<prefix>/feed`            | RSS 2.0 feed of recent posts                          |
 | GET    | `<prefix>/tag/{tagSlug}`   | List published posts filtered by tag                  |
 | GET    | `<prefix>/{slug}`          | View a single published post (includes related posts) |
 | GET    | `<prefix>/{slug}/comments` | List comments for a post                              |

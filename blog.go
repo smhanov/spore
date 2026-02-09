@@ -53,8 +53,15 @@ type service struct {
 	store       *storeAdapter
 }
 
+// Handler serves the blog's HTTP routes and provides methods for integrating
+// blog data (such as sitemap entries) into the host application.
+type Handler struct {
+	http.Handler
+	svc *service
+}
+
 // NewHandler wires routes for public and admin surfaces using the supplied configuration.
-func NewHandler(cfg Config) (http.Handler, error) {
+func NewHandler(cfg Config) (*Handler, error) {
 	if cfg.Store == nil {
 		return nil, fmt.Errorf("store is required")
 	}
@@ -100,7 +107,7 @@ func NewHandler(cfg Config) (http.Handler, error) {
 	s.tasks = newTaskRunner(s)
 	s.tasks.start()
 
-	return r, nil
+	return &Handler{Handler: r, svc: s}, nil
 }
 
 func parseTemplates(cfg Config) (map[string]*template.Template, error) {
