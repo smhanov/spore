@@ -10,7 +10,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jmoiron/sqlx"
 	_ "github.com/mattn/go-sqlite3"
-	blog "github.com/smhanov/go-blog"
+	blog "github.com/smhanov/spore"
 	"github.com/yuin/goldmark"
 )
 

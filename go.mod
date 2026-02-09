@@ -1,4 +1,4 @@
-module github.com/smhanov/go-blog
+module github.com/smhanov/spore
 
 go 1.24.0
 

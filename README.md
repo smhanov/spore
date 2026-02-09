@@ -36,7 +36,7 @@ Spore is a drop-in blogging handler for Go web apps. It renders public pages wit
 ## Installation
 
 ```bash
-go get github.com/smhanov/go-blog
+go get github.com/smhanov/spore
 ```
 
 ## Quick Start
@@ -119,7 +119,7 @@ import (
 
     "github.com/jmoiron/sqlx"
     _ "github.com/mattn/go-sqlite3"
-    blog "github.com/smhanov/go-blog"
+    blog "github.com/smhanov/spore"
 )
 
 func main() {
@@ -269,7 +269,7 @@ The package includes a ready-to-use SQLX implementation. Migrations are applied 
 import (
     "github.com/jmoiron/sqlx"
     _ "github.com/mattn/go-sqlite3" // or your preferred driver
-    blog "github.com/smhanov/go-blog"
+    blog "github.com/smhanov/spore"
 )
 
 func main() {
@@ -752,7 +752,7 @@ import (
     "github.com/go-chi/chi/v5/middleware"
     "github.com/jmoiron/sqlx"
     _ "github.com/mattn/go-sqlite3"
-    blog "github.com/smhanov/go-blog"
+    blog "github.com/smhanov/spore"
 )
 
 func main() {
