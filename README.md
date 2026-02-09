@@ -41,18 +41,9 @@ go get github.com/smhanov/spore
 
 ## Quick Start
 
-### 1. Build the admin frontend
+The admin UI is pre-built and embedded in the Go module — no Node.js or npm required.
 
-The admin UI is a Vue app that must be compiled before the Go code can embed it:
-
-```bash
-cd frontend
-npm install
-npm run build
-cd ..
-```
-
-### 2. Seed the database (Optional)
+### 1. Seed the database (Optional)
 
 This project includes a seed script that creates a SQLite database `blog.db` populated with sample content:
 
@@ -60,7 +51,7 @@ This project includes a seed script that creates a SQLite database `blog.db` pop
 go run ./cmd/seed/main.go
 ```
 
-### 3. Run the demo
+### 2. Run the demo
 
 The demo server will automatically use `blog.db` if it exists. Otherwise, it defaults to a transient in-memory store:
 
@@ -97,7 +88,7 @@ type Config struct {
     // CustomCSSURLs injects additional CSS files into rendered pages.
     CustomCSSURLs []string
 
-    // Optional metadata used for WXR export/import.
+    // Optional metadata used for WXR export/import and SEO.
     SiteTitle                string
     SiteDescription          string
     SiteURL                  string
@@ -438,6 +429,14 @@ Create a custom layout template that defines a `base.html` template:
     </title>
     {{if .Post}}
     <meta name="description" content="{{.Post.MetaDescription}}" />
+    {{if .CanonicalURL}}<link rel="canonical" href="{{.CanonicalURL}}" />{{end}}
+    <meta property="og:type" content="article" />
+    <meta property="og:title" content="{{.Post.Title}}" />
+    <meta property="og:description" content="{{.Post.MetaDescription}}" />
+    {{if .CanonicalURL}}<meta property="og:url" content="{{.CanonicalURL}}" />{{end}}
+    {{if .FirstImage}}<meta property="og:image" content="{{.FirstImage}}" />{{end}}
+    {{else}}
+    {{if .SiteDescription}}<meta name="description" content="{{.SiteDescription}}" />{{end}}
     {{end}} {{range .CustomCSS}}
     <link rel="stylesheet" href="{{.}}" />
     {{end}}
@@ -472,11 +471,15 @@ Templates receive the following data:
 
 ```go
 map[string]any{
-    "Posts":       []Post,      // List of published posts (with Tags populated)
-    "RoutePrefix": string,     // e.g., "/blog"
-    "CustomCSS":   []string,   // Custom CSS URLs
-    "TagSlug":     string,     // Set when filtering by tag (e.g., "golang")
-    "DateDisplay": string,     // "absolute" or "approximate"
+    "Posts":           []Post,      // List of published posts (with Tags populated)
+    "RoutePrefix":     string,      // e.g., "/blog"
+    "CustomCSS":       []string,    // Custom CSS URLs
+    "TagSlug":         string,      // Set when filtering by tag (e.g., "golang")
+    "DateDisplay":     string,      // "absolute" or "approximate"
+    "SiteTitle":       string,      // From Config.SiteTitle
+    "SiteURL":         string,      // From Config.SiteURL
+    "SiteDescription": string,      // From Config.SiteDescription
+    "CanonicalURL":    string,      // Full canonical URL for the page
 }
 ```
 
@@ -490,6 +493,11 @@ map[string]any{
     "CommentsEnabled": bool,          // Whether comments are enabled
     "RelatedPosts":    []RelatedPost, // Up to 4 related posts with images/excerpts
     "DateDisplay":     string,        // "absolute" or "approximate"
+    "SiteTitle":       string,        // From Config.SiteTitle
+    "SiteURL":         string,        // From Config.SiteURL
+    "SiteDescription": string,        // From Config.SiteDescription
+    "CanonicalURL":    string,        // Full canonical URL for the post
+    "FirstImage":      string,        // Absolute URL of first image in post (for og:image)
 }
 ```
 
@@ -497,6 +505,8 @@ map[string]any{
 
 - `safeHTML` — renders HTML content without escaping (use for `Post.ContentHTML`)
 - `formatPublishedDate` — formats a `*time.Time` according to the current `DateDisplay` setting
+- `rfc3339` — formats a `*time.Time` as an RFC 3339 string (used in SEO meta tags)
+- `jsonEscape` — escapes a string for safe use inside JSON literals
 
 ## Admin UI
 
@@ -519,10 +529,18 @@ The admin interface is embedded from `frontend/dist` and accessible at `<RoutePr
 
 ### Building the Admin UI
 
+The pre-built admin UI is included in the repository and embedded at compile time — most users never need to rebuild it. If you want to modify the admin frontend:
+
 ```bash
 cd frontend
 npm install
 npm run build
+```
+
+Or use `go generate`:
+
+```bash
+go generate ./...
 ```
 
 The build output in `frontend/dist` is automatically embedded when you build your Go application.
@@ -789,6 +807,9 @@ func main() {
         AdminAuthMiddleware: adminAuth,
         LayoutTemplatePath:  "templates/layout.html",
         CustomCSSURLs:       []string{"/static/blog.css"},
+        SiteTitle:           "My Company Blog",
+        SiteDescription:     "Insights and updates from My Company",
+        SiteURL:             "https://example.com",
     })
     if err != nil {
         log.Fatal(err)

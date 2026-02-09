@@ -50,12 +50,16 @@ func (s *service) handleListPosts(w http.ResponseWriter, r *http.Request) {
 	}
 
 	data := map[string]any{
-		"Posts":       posts,
-		"RoutePrefix": s.routePrefix,
-		"CustomCSS":   s.cfg.CustomCSSURLs,
-		"DateDisplay": settings.DateDisplay,
-		"Limit":       limit,
-		"NextOffset":  offset + len(posts),
+		"Posts":           posts,
+		"RoutePrefix":     s.routePrefix,
+		"CustomCSS":       s.cfg.CustomCSSURLs,
+		"DateDisplay":     settings.DateDisplay,
+		"Limit":           limit,
+		"NextOffset":      offset + len(posts),
+		"SiteTitle":       s.cfg.SiteTitle,
+		"SiteURL":         s.cfg.SiteURL,
+		"SiteDescription": s.cfg.SiteDescription,
+		"CanonicalURL":    s.canonicalURL("/"),
 	}
 
 	s.executeTemplate(w, "list.html", data)
@@ -88,13 +92,17 @@ func (s *service) handleListPostsByTag(w http.ResponseWriter, r *http.Request) {
 	}
 
 	data := map[string]any{
-		"Posts":       posts,
-		"RoutePrefix": s.routePrefix,
-		"CustomCSS":   s.cfg.CustomCSSURLs,
-		"TagSlug":     tagSlug,
-		"DateDisplay": settings.DateDisplay,
-		"Limit":       limit,
-		"NextOffset":  offset + len(posts),
+		"Posts":           posts,
+		"RoutePrefix":     s.routePrefix,
+		"CustomCSS":       s.cfg.CustomCSSURLs,
+		"TagSlug":         tagSlug,
+		"DateDisplay":     settings.DateDisplay,
+		"Limit":           limit,
+		"NextOffset":      offset + len(posts),
+		"SiteTitle":       s.cfg.SiteTitle,
+		"SiteURL":         s.cfg.SiteURL,
+		"SiteDescription": s.cfg.SiteDescription,
+		"CanonicalURL":    s.canonicalURL("/tag/" + tagSlug),
 	}
 
 	s.executeTemplate(w, "list.html", data)
@@ -190,6 +198,8 @@ func (s *service) handleViewPost(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	firstImage := extractFirstImage(post.ContentHTML)
+
 	data := map[string]any{
 		"Post":            post,
 		"RoutePrefix":     s.routePrefix,
@@ -197,6 +207,11 @@ func (s *service) handleViewPost(w http.ResponseWriter, r *http.Request) {
 		"CommentsEnabled": settings.CommentsEnabled,
 		"RelatedPosts":    relatedPosts,
 		"DateDisplay":     settings.DateDisplay,
+		"SiteTitle":       s.cfg.SiteTitle,
+		"SiteURL":         s.cfg.SiteURL,
+		"SiteDescription": s.cfg.SiteDescription,
+		"CanonicalURL":    s.canonicalURL("/" + post.Slug),
+		"FirstImage":      s.resolveImageURL(firstImage),
 	}
 
 	s.executeTemplate(w, "post.html", data)
@@ -253,4 +268,31 @@ func (s *service) executeTemplate(w http.ResponseWriter, name string, data any) 
 	if err := tpl.ExecuteTemplate(w, "base.html", data); err != nil {
 		http.Error(w, "template render error", http.StatusInternalServerError)
 	}
+}
+
+// canonicalURL builds a full canonical URL by joining SiteURL + routePrefix + path.
+func (s *service) canonicalURL(path string) string {
+	if s.cfg.SiteURL == "" {
+		return ""
+	}
+	base := strings.TrimSuffix(s.cfg.SiteURL, "/")
+	return base + s.routePrefix + path
+}
+
+// resolveImageURL converts a relative image URL to an absolute URL using SiteURL.
+func (s *service) resolveImageURL(img string) string {
+	if img == "" {
+		return ""
+	}
+	if strings.HasPrefix(img, "http://") || strings.HasPrefix(img, "https://") {
+		return img
+	}
+	if s.cfg.SiteURL == "" {
+		return img
+	}
+	base := strings.TrimSuffix(s.cfg.SiteURL, "/")
+	if !strings.HasPrefix(img, "/") {
+		img = "/" + img
+	}
+	return base + img
 }

@@ -4,19 +4,74 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>{{if .Post}}{{.Post.Title}}{{else}}Blog{{end}}</title>
+  <title>{{if .Post}}{{.Post.Title}}{{if .SiteTitle}} | {{.SiteTitle}}{{end}}{{else if .TagSlug}}Posts tagged &#34;{{.TagSlug}}&#34;{{if .SiteTitle}} | {{.SiteTitle}}{{end}}{{else}}{{if .SiteTitle}}{{.SiteTitle}}{{else}}Blog{{end}}{{end}}</title>
+
   {{if .Post}}
+    {{/* === Post page SEO === */}}
     <meta name="description" content="{{.Post.MetaDescription}}">
+    {{if .CanonicalURL}}<link rel="canonical" href="{{.CanonicalURL}}">{{end}}
+
+    {{/* Open Graph */}}
+    <meta property="og:type" content="article">
     <meta property="og:title" content="{{.Post.Title}}">
     <meta property="og:description" content="{{.Post.MetaDescription}}">
-    <meta property="twitter:card" content="summary">
+    {{if .CanonicalURL}}<meta property="og:url" content="{{.CanonicalURL}}">{{end}}
+    {{if .SiteTitle}}<meta property="og:site_name" content="{{.SiteTitle}}">{{end}}
+    {{if .FirstImage}}<meta property="og:image" content="{{.FirstImage}}">{{end}}
+    {{if .Post.PublishedAt}}<meta property="article:published_time" content="{{rfc3339 .Post.PublishedAt}}">{{end}}
+    {{if .Post.UpdatedAt}}<meta property="article:modified_time" content="{{rfc3339 .Post.UpdatedAt}}">{{end}}
+    {{range .Post.Tags}}<meta property="article:tag" content="{{.Name}}">
+    {{end}}
+
+    {{/* Twitter Card */}}
+    <meta name="twitter:card" content="{{if .FirstImage}}summary_large_image{{else}}summary{{end}}">
+    <meta name="twitter:title" content="{{.Post.Title}}">
+    <meta name="twitter:description" content="{{.Post.MetaDescription}}">
+    {{if .FirstImage}}<meta name="twitter:image" content="{{.FirstImage}}">{{end}}
+
+    {{/* JSON-LD Structured Data */}}
     <script type="application/ld+json">{
       "@context": "https://schema.org",
       "@type": "BlogPosting",
-      "headline": {{printf "%q" .Post.Title}},
-      "description": {{printf "%q" .Post.MetaDescription}}
+      "headline": "{{jsonEscape .Post.Title}}",
+      "description": "{{jsonEscape .Post.MetaDescription}}"
+      {{- if .CanonicalURL -}},"url": "{{.CanonicalURL}}"{{- end -}}
+      {{- if .FirstImage -}},"image": "{{.FirstImage}}"{{- end -}}
+      {{- if .Post.PublishedAt -}},"datePublished": "{{rfc3339 .Post.PublishedAt}}"{{- end -}}
+      {{- if .Post.UpdatedAt -}},"dateModified": "{{rfc3339 .Post.UpdatedAt}}"{{- end -}}
+      {{- if .CanonicalURL -}},"mainEntityOfPage": {"@type": "WebPage", "@id": "{{.CanonicalURL}}"}{{- end -}}
     }</script>
+
+  {{else}}
+    {{/* === List page SEO === */}}
+    {{if .SiteDescription}}<meta name="description" content="{{.SiteDescription}}">{{end}}
+    {{if .CanonicalURL}}<link rel="canonical" href="{{.CanonicalURL}}">{{end}}
+
+    <meta property="og:type" content="website">
+    {{if .TagSlug}}<meta property="og:title" content="Posts tagged {{.TagSlug}}">
+    {{else if .SiteTitle}}<meta property="og:title" content="{{.SiteTitle}}">
+    {{else}}<meta property="og:title" content="Blog">{{end}}
+    {{if .SiteDescription}}<meta property="og:description" content="{{.SiteDescription}}">{{end}}
+    {{if .CanonicalURL}}<meta property="og:url" content="{{.CanonicalURL}}">{{end}}
+    {{if .SiteTitle}}<meta property="og:site_name" content="{{.SiteTitle}}">{{end}}
+
+    <meta name="twitter:card" content="summary">
+    {{if .TagSlug}}<meta name="twitter:title" content="Posts tagged {{.TagSlug}}">
+    {{else if .SiteTitle}}<meta name="twitter:title" content="{{.SiteTitle}}">
+    {{else}}<meta name="twitter:title" content="Blog">{{end}}
+    {{if .SiteDescription}}<meta name="twitter:description" content="{{.SiteDescription}}">{{end}}
+
+    {{if .SiteTitle}}
+    <script type="application/ld+json">{
+      "@context": "https://schema.org",
+      "@type": "Blog",
+      "name": "{{jsonEscape .SiteTitle}}"
+      {{- if .SiteDescription -}},"description": "{{jsonEscape .SiteDescription}}"{{- end -}}
+      {{- if .CanonicalURL -}},"url": "{{.CanonicalURL}}"{{- end -}}
+    }</script>
+    {{end}}
   {{end}}
+
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/modern-normalize/modern-normalize.css">
   {{range .CustomCSS}}
     <link rel="stylesheet" href="{{.}}">
@@ -33,7 +88,7 @@
 <body>
   <header>
     <div class="container">
-      <a href="{{.RoutePrefix}}/" style="color:white;font-weight:600;font-size:18px;">Blog</a>
+      <a href="{{.RoutePrefix}}/" style="color:white;font-weight:600;font-size:18px;">{{if .SiteTitle}}{{.SiteTitle}}{{else}}Blog{{end}}</a>
     </div>
   </header>
   <main class="container">

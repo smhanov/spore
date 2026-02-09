@@ -3,6 +3,7 @@ package blog
 import (
 	"context"
 	"embed"
+	"encoding/json"
 	"fmt"
 	"html/template"
 	"io/fs"
@@ -10,9 +11,12 @@ import (
 	"os"
 	"path"
 	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 )
+
+//go:generate sh -c "cd frontend && npm install && npm run build"
 
 //go:embed templates/*.html
 var defaultTemplatesFS embed.FS
@@ -103,6 +107,17 @@ func parseTemplates(cfg Config) (map[string]*template.Template, error) {
 	funcMap := template.FuncMap{
 		"safeHTML":            func(s string) template.HTML { return template.HTML(s) },
 		"formatPublishedDate": formatPublishedDate,
+		"rfc3339": func(t *time.Time) string {
+			if t == nil {
+				return ""
+			}
+			return t.Format(time.RFC3339)
+		},
+		"jsonEscape": func(s string) string {
+			b, _ := json.Marshal(s)
+			// Strip the surrounding quotes since the template already provides them
+			return string(b[1 : len(b)-1])
+		},
 	}
 
 	build := func(extra ...string) (*template.Template, error) {
