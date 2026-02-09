@@ -181,7 +181,7 @@ func (s *SQLXStore) Get(ctx context.Context, id string) (*Entity, error) {
 		return nil, nil
 	}
 	var entity Entity
-	query := `SELECT id, kind, slug, status, owner_id, parent_id, created_at, updated_at, published_at, attributes FROM blog_entities WHERE id = ?`
+	query := `SELECT id, kind, COALESCE(slug,'') AS slug, COALESCE(status,'') AS status, COALESCE(owner_id,'') AS owner_id, COALESCE(parent_id,'') AS parent_id, created_at, updated_at, published_at, attributes FROM blog_entities WHERE id = ?`
 	query = s.DB.Rebind(query)
 	if err := s.DB.GetContext(ctx, &entity, query, id); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -194,7 +194,7 @@ func (s *SQLXStore) Get(ctx context.Context, id string) (*Entity, error) {
 
 // Find retrieves entities matching a query.
 func (s *SQLXStore) Find(ctx context.Context, q Query) ([]*Entity, error) {
-	baseQuery := `SELECT id, kind, slug, status, owner_id, parent_id, created_at, updated_at, published_at, attributes FROM blog_entities`
+	baseQuery := `SELECT id, kind, COALESCE(slug,'') AS slug, COALESCE(status,'') AS status, COALESCE(owner_id,'') AS owner_id, COALESCE(parent_id,'') AS parent_id, created_at, updated_at, published_at, attributes FROM blog_entities`
 	var conditions []string
 	var args []interface{}
 

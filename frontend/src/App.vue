@@ -54,8 +54,8 @@
           <a href="#" @click.prevent="currentView = 'comments'; sidebarOpen = false" 
              :class="['flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all duration-200 group', 
              currentView === 'comments' ? 'bg-brand-50 text-brand-700 shadow-sm ring-1 ring-brand-100' : 'text-slate-600 hover:bg-white hover:shadow-sm']">
-            <i class="ph ph-chat-circle-dots text-lg"></i>
-            Comments
+            <i class="ph ph-gear text-lg"></i>
+            Settings
           </a>
 
           <a href="#" @click.prevent="currentView = 'wxr'; sidebarOpen = false" 
@@ -462,12 +462,12 @@
           </div>
         </div>
 
-        <!-- VIEW: COMMENTS -->
+        <!-- VIEW: SETTINGS -->
         <div v-else-if="currentView === 'comments'" class="h-full flex flex-col overflow-y-auto">
           <div class="p-4 md:p-8 pb-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
             <div>
-              <h2 class="text-2xl font-bold text-slate-900">Comments</h2>
-              <p class="text-slate-500 text-sm mt-1">Moderate discussions and control comment availability</p>
+              <h2 class="text-2xl font-bold text-slate-900">Settings</h2>
+              <p class="text-slate-500 text-sm mt-1">Configure your blog identity, comments, and display options</p>
             </div>
             <button @click="saveBlogSettings" :disabled="blogSettingsSaving" 
               :class="['text-white px-5 py-2.5 rounded-xl text-sm font-medium shadow-lg transition-all active:scale-95 flex items-center gap-2', blogSettingsSaving ? 'bg-slate-500 cursor-not-allowed' : 'bg-slate-900 hover:bg-slate-800']">
@@ -477,6 +477,24 @@
           </div>
 
           <div class="px-4 md:px-8 pb-8 space-y-6">
+            <!-- Site Identity -->
+            <div class="bg-white border border-slate-200/60 rounded-2xl p-5 shadow-sm space-y-4">
+              <div>
+                <h3 class="text-lg font-bold text-slate-900">Site Identity</h3>
+                <p class="text-sm text-slate-500 mt-1">Set the title and description used in page headers, SEO meta tags, and social sharing.</p>
+              </div>
+              <div>
+                <label class="block text-sm font-semibold text-slate-700 mb-1">Blog Title</label>
+                <input v-model="blogSettings.title" type="text" placeholder="My Blog" class="w-full text-sm p-2.5 border border-slate-200 rounded-lg focus:border-brand-500 focus:ring-1 focus:ring-brand-500 outline-none">
+                <p class="text-xs text-slate-400 mt-1">Displayed in the header, browser tab, and Open Graph tags.</p>
+              </div>
+              <div>
+                <label class="block text-sm font-semibold text-slate-700 mb-1">Blog Description</label>
+                <textarea v-model="blogSettings.description" rows="2" placeholder="A short description of your blog" class="w-full text-sm p-2.5 border border-slate-200 rounded-lg focus:border-brand-500 focus:ring-1 focus:ring-brand-500 outline-none resize-y"></textarea>
+                <p class="text-xs text-slate-400 mt-1">Used as the meta description for listing pages and social previews.</p>
+              </div>
+            </div>
+
             <div class="bg-white border border-slate-200/60 rounded-2xl p-5 shadow-sm">
               <div class="flex items-center justify-between gap-4">
                 <div>
@@ -638,7 +656,7 @@ const aiNotes = ref('')
 const aiUseSearch = ref(false)
 const aiHighlightEnabled = ref(true)
 const aiHighlight = ref(null)
-const blogSettings = ref({ comments_enabled: true, date_display: 'absolute' })
+const blogSettings = ref({ comments_enabled: true, date_display: 'absolute', title: '', description: '' })
 const blogSettingsLoading = ref(false)
 const blogSettingsSaving = ref(false)
 const moderationComments = ref([])
@@ -769,7 +787,7 @@ async function loadBlogSettings() {
   blogSettingsLoading.value = true
   try {
     const result = await getBlogSettings()
-    blogSettings.value = result || { comments_enabled: true, date_display: 'absolute' }
+    blogSettings.value = result || { comments_enabled: true, date_display: 'absolute', title: '', description: '' }
   } catch (err) {
     showToast('Failed to load blog settings: ' + err.message, 'error')
   } finally {
@@ -782,7 +800,9 @@ async function saveBlogSettings() {
   try {
     const result = await updateBlogSettings({
       comments_enabled: !!blogSettings.value.comments_enabled,
-      date_display: blogSettings.value.date_display || 'absolute'
+      date_display: blogSettings.value.date_display || 'absolute',
+      title: blogSettings.value.title || '',
+      description: blogSettings.value.description || ''
     })
     blogSettings.value = result || blogSettings.value
     showToast('Blog settings saved')

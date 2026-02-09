@@ -56,9 +56,9 @@ func (s *service) handleListPosts(w http.ResponseWriter, r *http.Request) {
 		"DateDisplay":     settings.DateDisplay,
 		"Limit":           limit,
 		"NextOffset":      offset + len(posts),
-		"SiteTitle":       s.cfg.SiteTitle,
+		"SiteTitle":       s.effectiveTitle(settings),
 		"SiteURL":         s.cfg.SiteURL,
-		"SiteDescription": s.cfg.SiteDescription,
+		"SiteDescription": s.effectiveDescription(settings),
 		"CanonicalURL":    s.canonicalURL("/"),
 	}
 
@@ -99,9 +99,9 @@ func (s *service) handleListPostsByTag(w http.ResponseWriter, r *http.Request) {
 		"DateDisplay":     settings.DateDisplay,
 		"Limit":           limit,
 		"NextOffset":      offset + len(posts),
-		"SiteTitle":       s.cfg.SiteTitle,
+		"SiteTitle":       s.effectiveTitle(settings),
 		"SiteURL":         s.cfg.SiteURL,
-		"SiteDescription": s.cfg.SiteDescription,
+		"SiteDescription": s.effectiveDescription(settings),
 		"CanonicalURL":    s.canonicalURL("/tag/" + tagSlug),
 	}
 
@@ -207,9 +207,9 @@ func (s *service) handleViewPost(w http.ResponseWriter, r *http.Request) {
 		"CommentsEnabled": settings.CommentsEnabled,
 		"RelatedPosts":    relatedPosts,
 		"DateDisplay":     settings.DateDisplay,
-		"SiteTitle":       s.cfg.SiteTitle,
+		"SiteTitle":       s.effectiveTitle(settings),
 		"SiteURL":         s.cfg.SiteURL,
-		"SiteDescription": s.cfg.SiteDescription,
+		"SiteDescription": s.effectiveDescription(settings),
 		"CanonicalURL":    s.canonicalURL("/" + post.Slug),
 		"FirstImage":      s.resolveImageURL(firstImage),
 	}
@@ -256,6 +256,22 @@ func pickDeterministicPosts(posts []Post, excludeID string, limit int, seed int6
 		pool[i], pool[j] = pool[j], pool[i]
 	}
 	return pool[:limit]
+}
+
+// effectiveTitle returns the stored blog title if set, falling back to config.
+func (s *service) effectiveTitle(settings BlogSettings) string {
+	if settings.Title != "" {
+		return settings.Title
+	}
+	return s.cfg.SiteTitle
+}
+
+// effectiveDescription returns the stored blog description if set, falling back to config.
+func (s *service) effectiveDescription(settings BlogSettings) string {
+	if settings.Description != "" {
+		return settings.Description
+	}
+	return s.cfg.SiteDescription
 }
 
 func (s *service) executeTemplate(w http.ResponseWriter, name string, data any) {

@@ -59,6 +59,8 @@ type aiSettingsAttrs struct {
 type blogSettingsAttrs struct {
 	CommentsEnabled bool   `json:"comments_enabled"`
 	DateDisplay     string `json:"date_display"`
+	Title           string `json:"title"`
+	Description     string `json:"description"`
 }
 
 func decodeAttrs(attrs Attributes, target interface{}) error {
@@ -270,6 +272,8 @@ func entityFromBlogSettings(settings *BlogSettings) *Entity {
 	if settings != nil {
 		attrs.CommentsEnabled = settings.CommentsEnabled
 		attrs.DateDisplay = settings.DateDisplay
+		attrs.Title = settings.Title
+		attrs.Description = settings.Description
 	}
 	return &Entity{
 		ID:   entityIDBlogSettings,
@@ -277,6 +281,8 @@ func entityFromBlogSettings(settings *BlogSettings) *Entity {
 		Attrs: Attributes{
 			"comments_enabled": attrs.CommentsEnabled,
 			"date_display":     attrs.DateDisplay,
+			"title":            attrs.Title,
+			"description":      attrs.Description,
 		},
 	}
 }
@@ -289,7 +295,12 @@ func entityToBlogSettings(e *Entity) (*BlogSettings, error) {
 	if err := decodeAttrs(e.Attrs, &attrs); err != nil {
 		return nil, err
 	}
-	return &BlogSettings{CommentsEnabled: attrs.CommentsEnabled, DateDisplay: attrs.DateDisplay}, nil
+	return &BlogSettings{
+		CommentsEnabled: attrs.CommentsEnabled,
+		DateDisplay:     attrs.DateDisplay,
+		Title:           attrs.Title,
+		Description:     attrs.Description,
+	}, nil
 }
 
 func valueOrEmpty(value *string) string {

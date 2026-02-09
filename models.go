@@ -43,6 +43,8 @@ type AISettings struct {
 type BlogSettings struct {
 	CommentsEnabled bool   `json:"comments_enabled" db:"comments_enabled"`
 	DateDisplay     string `json:"date_display" db:"date_display"`
+	Title           string `json:"title" db:"title"`
+	Description     string `json:"description" db:"description"`
 }
 
 // Comment represents a public comment on a blog post.

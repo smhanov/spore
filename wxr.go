@@ -831,6 +831,18 @@ func readWXRPayload(r *http.Request) (io.Reader, error) {
 	return r.Body, nil
 }
 
+// ImportWXRData imports posts and comments from a WXR payload into the given
+// store. This is useful for programmatic imports (e.g., seeding a database)
+// without requiring the full HTTP service to be running.
+func ImportWXRData(ctx context.Context, store BlogStore, payload []byte) error {
+	s := &service{
+		cfg:   Config{Store: store},
+		store: newStoreAdapter(store),
+	}
+	_, err := s.importWXR(ctx, payload)
+	return err
+}
+
 func (s *service) listAllPosts(ctx context.Context) ([]Post, error) {
 	limit := 200
 	offset := 0

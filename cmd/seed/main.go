@@ -3,11 +3,11 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/xml"
 	"fmt"
 	"log"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/jmoiron/sqlx"
 	_ "github.com/mattn/go-sqlite3"
 	blog "github.com/smhanov/spore"
@@ -17,9 +17,11 @@ import (
 var budgiePosts = []struct {
 	Title    string
 	Markdown string
+	Tags     []string
 }{
 	{
 		Title: "The Ultimate Guide to Budgie Diet",
+		Tags:  []string{"diet", "health"},
 		Markdown: `Feeding your budgie a balanced diet is crucial for their health.
 
 ## Seeds vs Pellets
@@ -33,6 +35,7 @@ Never feed your budgie avocado, chocolate, or caffeine.`,
 	},
 	{
 		Title: "Top 5 Toys for Your Budgie",
+		Tags:  []string{"toys", "enrichment"},
 		Markdown: `Budgies are intelligent birds that need stimulation.
 
 1. **Mirrors**: Budgies love interacting with their reflection (but use in moderation).
@@ -43,6 +46,7 @@ Never feed your budgie avocado, chocolate, or caffeine.`,
 	},
 	{
 		Title: "How to Teach Your Budgie to Talk",
+		Tags:  []string{"training", "behavior"},
 		Markdown: `Budgies are among the best talkers in the parrot world.
 
 ## Repetition is Key
@@ -56,6 +60,7 @@ Some budgies pick it up in weeks, others take months. Keep at it!`,
 	},
 	{
 		Title: "Understanding Budgie Colors and Mutations",
+		Tags:  []string{"genetics", "colors"},
 		Markdown: `Budgies come in a rainbow of colors.
 
 - **Green Series**: The wild type, dominant gene.
@@ -67,6 +72,7 @@ Genetics can be complex but fascinating!`,
 	},
 	{
 		Title: "Choosing the Right Cage Size",
+		Tags:  []string{"housing", "care"},
 		Markdown: `A bigger cage is always better.
 
 ## Minimum Dimensions
@@ -80,6 +86,7 @@ Horizontal space is more important than vertical space for flying.`,
 	},
 	{
 		Title: "Signs of a Healthy Budgie",
+		Tags:  []string{"health", "care"},
 		Markdown: `Knowing what to look for can save your bird's life.
 
 - **Bright Eyes**: Clear and alert.
@@ -91,6 +98,7 @@ If you notice puffing up or lethargy, see a vet immediately.`,
 	},
 	{
 		Title: "Bonding with Your New Budgie",
+		Tags:  []string{"bonding", "training"},
 		Markdown: `Building trust takes time.
 
 1. **Give them space** for the first few days.
@@ -102,6 +110,7 @@ Consistency builds the strongest bond.`,
 	},
 	{
 		Title: "Deciphering Budgie Sounds",
+		Tags:  []string{"behavior", "sounds"},
 		Markdown: `What is your bird trying to say?
 
 - **Chirping**: Happy and content.
@@ -111,6 +120,7 @@ Consistency builds the strongest bond.`,
 	},
 	{
 		Title: "How Long Do Budgies Live?",
+		Tags:  []string{"health", "lifespan"},
 		Markdown: `In captivity, budgies typically live between 5 to 10 years, though some reach 15!
 
 ## Factors Influencing Longevity
@@ -121,6 +131,7 @@ Consistency builds the strongest bond.`,
 	},
 	{
 		Title: "Budgie Sleep Requirements",
+		Tags:  []string{"health", "care"},
 		Markdown: `Budgies need plenty of rest to stay healthy.
 
 ## Hours Needed
@@ -148,53 +159,94 @@ func main() {
 	if err := store.Migrate(context.Background()); err != nil {
 		log.Fatalf("Failed to run migrations: %v", err)
 	}
-	ctx := context.Background()
 
-	fmt.Println("Seeding posts...")
-	for i, bp := range budgiePosts {
-		now := time.Now().Add(time.Duration(-i) * 24 * time.Hour) // Publish spaced out by days
+	fmt.Println("Building WXR document...")
+	wxrPayload, err := buildSeedWXR()
+	if err != nil {
+		log.Fatalf("Failed to build WXR: %v", err)
+	}
 
-		var buf bytes.Buffer
-		if err := goldmark.Convert([]byte(bp.Markdown), &buf); err != nil {
-			log.Fatalf("Failed to convert markdown for '%s': %v", bp.Title, err)
-		}
-
-		post := &blog.Post{
-			ID:              uuid.New().String(),
-			Slug:            fmt.Sprintf("budgie-post-%d", i+1),
-			Title:           bp.Title,
-			ContentMarkdown: bp.Markdown,
-			ContentHTML:     buf.String(),
-			PublishedAt:     &now,
-			MetaDescription: fmt.Sprintf("Read about %s", bp.Title),
-			AuthorID:        1,
-		}
-
-		status := "draft"
-		if post.PublishedAt != nil {
-			status = "published"
-		}
-		entity := &blog.Entity{
-			ID:          post.ID,
-			Kind:        "post",
-			Slug:        post.Slug,
-			Status:      status,
-			PublishedAt: post.PublishedAt,
-			Attrs: blog.Attributes{
-				"title":            post.Title,
-				"content_markdown": post.ContentMarkdown,
-				"content_html":     post.ContentHTML,
-				"meta_description": post.MetaDescription,
-				"author_id":        post.AuthorID,
-				"tags":             post.Tags,
-			},
-		}
-		if err := store.Save(ctx, entity); err != nil {
-			log.Printf("Failed to create post '%s': %v", post.Title, err)
-		} else {
-			fmt.Printf("Created post: %s\n", post.Title)
-		}
+	fmt.Println("Importing via WXR...")
+	if err := blog.ImportWXRData(context.Background(), store, wxrPayload); err != nil {
+		log.Fatalf("WXR import failed: %v", err)
 	}
 
 	fmt.Println("Done!")
+}
+
+// buildSeedWXR generates a WXR XML document from the built-in budgie posts.
+func buildSeedWXR() ([]byte, error) {
+	type wxrCategory struct {
+		XMLName  xml.Name `xml:"category"`
+		Domain   string   `xml:"domain,attr"`
+		Nicename string   `xml:"nicename,attr"`
+		Name     string   `xml:",cdata"`
+	}
+	type wxrItem struct {
+		Title          string        `xml:"title"`
+		ContentEncoded string        `xml:"content:encoded"`
+		PostDateGMT    string        `xml:"wp:post_date_gmt"`
+		PostName       string        `xml:"wp:post_name"`
+		Status         string        `xml:"wp:status"`
+		PostType       string        `xml:"wp:post_type"`
+		Categories     []wxrCategory `xml:"category,omitempty"`
+	}
+	type wxrChannel struct {
+		Title string    `xml:"title"`
+		Items []wxrItem `xml:"item"`
+	}
+	type wxrRSS struct {
+		XMLName   xml.Name   `xml:"rss"`
+		Version   string     `xml:"version,attr"`
+		ContentNS string     `xml:"xmlns:content,attr"`
+		WPNS      string     `xml:"xmlns:wp,attr"`
+		Channel   wxrChannel `xml:"channel"`
+	}
+
+	items := make([]wxrItem, 0, len(budgiePosts))
+	for i, bp := range budgiePosts {
+		var buf bytes.Buffer
+		if err := goldmark.Convert([]byte(bp.Markdown), &buf); err != nil {
+			return nil, fmt.Errorf("convert markdown for %q: %w", bp.Title, err)
+		}
+		pubDate := time.Now().Add(time.Duration(-i) * 24 * time.Hour).UTC()
+
+		cats := make([]wxrCategory, 0, len(bp.Tags))
+		for _, t := range bp.Tags {
+			cats = append(cats, wxrCategory{
+				Domain:   "post_tag",
+				Nicename: t,
+				Name:     t,
+			})
+		}
+
+		items = append(items, wxrItem{
+			Title:          bp.Title,
+			ContentEncoded: buf.String(),
+			PostDateGMT:    pubDate.Format("2006-01-02 15:04:05"),
+			PostName:       fmt.Sprintf("budgie-post-%d", i+1),
+			Status:         "publish",
+			PostType:       "post",
+			Categories:     cats,
+		})
+	}
+
+	rss := wxrRSS{
+		Version:   "2.0",
+		ContentNS: "http://purl.org/rss/1.0/modules/content/",
+		WPNS:      "http://wordpress.org/export/1.2/",
+		Channel: wxrChannel{
+			Title: "Budgie Blog Seed Data",
+			Items: items,
+		},
+	}
+
+	var out bytes.Buffer
+	out.WriteString("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n")
+	enc := xml.NewEncoder(&out)
+	enc.Indent("", "  ")
+	if err := enc.Encode(rss); err != nil {
+		return nil, err
+	}
+	return out.Bytes(), nil
 }
