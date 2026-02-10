@@ -185,25 +185,22 @@ func (s *service) handleUploadImage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	id := generateID()
-	url, err := s.cfg.ImageStore.SaveImage(r.Context(), id, header.Filename, contentType, file)
+	storeURL, err := s.cfg.ImageStore.SaveImage(r.Context(), id, header.Filename, contentType, file)
 	if err != nil {
 		http.Error(w, "failed to save image", http.StatusInternalServerError)
 		return
 	}
-	savedID := id
-	if url != "" {
-		base := path.Base(url)
-		if base != "" && base != "/" {
-			if ext := path.Ext(base); ext != "" {
-				base = strings.TrimSuffix(base, ext)
-			}
-			savedID = base
-		}
+	// Extract the filename from the store URL to build the public-facing URL.
+	savedFilename := path.Base(storeURL)
+	savedID := savedFilename
+	if ext := path.Ext(savedFilename); ext != "" {
+		savedID = strings.TrimSuffix(savedFilename, ext)
 	}
+	publicURL := s.routePrefix + "/images/" + savedFilename
 
 	writeJSON(w, map[string]string{
 		"id":  savedID,
-		"url": url,
+		"url": publicURL,
 	})
 }
 

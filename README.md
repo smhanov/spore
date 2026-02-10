@@ -657,9 +657,9 @@ Here is a minimal `list.html` that uses `PostSummary` data and pagination to bui
 
 Save this as `templates/blog/list.html` and set `TemplatesDir: "templates/blog"` in your config.
 
-### Example: Custom Post Template with Comments
+### Example: Custom Post Template with Related Posts and Comments
 
-The comment system (HTML, CSS, and JavaScript) is packaged as a reusable `{{template "comments" .}}` block. When writing a custom `post.html`, include it wherever you want comments to appear:
+The related posts and comment system are available as template data on every post page. When writing a custom `post.html`, iterate over `.RelatedPosts` to render related post cards, and include `{{template "comments" .}}` for the comment section:
 
 ```html
 {{define "content"}}
@@ -671,10 +671,32 @@ The comment system (HTML, CSS, and JavaScript) is packaged as a reusable `{{temp
   <div>{{safeHTML .Post.ContentHTML}}</div>
 </article>
 
+{{/* Related posts — each item is a RelatedPost with FirstImage and Excerpt */}}
+{{if .RelatedPosts}}
+<section style="max-width: 700px; margin: 0 auto; padding: 0 20px 40px">
+  <h3>Related Posts</h3>
+  <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 16px">
+    {{range .RelatedPosts}}
+    <a href="{{$.RoutePrefix}}/{{.Slug}}" style="text-decoration: none; color: inherit; border: 1px solid #e5e7eb; border-radius: 8px; overflow: hidden">
+      {{if .FirstImage}}
+      <img src="{{.FirstImage}}" alt="{{.Title}}" style="width: 100%; height: 120px; object-fit: cover">
+      {{end}}
+      <div style="padding: 12px">
+        <h4 style="margin: 0 0 4px">{{.Title}}</h4>
+        {{if .Excerpt}}<p style="margin: 0; color: #6b7280; font-size: 0.875rem">{{.Excerpt}}</p>{{end}}
+      </div>
+    </a>
+    {{end}}
+  </div>
+</section>
+{{end}}
+
 {{/* Include the built-in comment section — form, styles, and JS */}}
 {{template "comments" .}}
 {{end}} {{define "post.html"}} {{template "base.html" .}} {{end}}
 ```
+
+Each `RelatedPost` in `.RelatedPosts` has all the fields of a `Post` plus `FirstImage` (URL of the first image in the post) and `Excerpt` (plain-text excerpt up to 150 characters). See the [RelatedPost](#relatedpost) data model for details.
 
 The `comments` template requires `.Post.Slug`, `.RoutePrefix`, and `.CommentsEnabled` in the template data, all of which are provided automatically on post pages.
 
