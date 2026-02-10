@@ -31,20 +31,25 @@ func (s *service) handleListPosts(w http.ResponseWriter, r *http.Request) {
 	limit := 10
 	offset := 0
 	page := 1
-	if v := r.URL.Query().Get("limit"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil && n > 0 && n <= 100 {
-			limit = n
+
+	if s.cfg.ListAll {
+		limit = 100000
+	} else {
+		if v := r.URL.Query().Get("limit"); v != "" {
+			if n, err := strconv.Atoi(v); err == nil && n > 0 && n <= 100 {
+				limit = n
+			}
 		}
-	}
-	if v := r.URL.Query().Get("offset"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil && n >= 0 {
-			offset = n
+		if v := r.URL.Query().Get("offset"); v != "" {
+			if n, err := strconv.Atoi(v); err == nil && n >= 0 {
+				offset = n
+			}
 		}
-	}
-	if v := r.URL.Query().Get("page"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil && n > 0 {
-			page = n
-			offset = (page - 1) * limit
+		if v := r.URL.Query().Get("page"); v != "" {
+			if n, err := strconv.Atoi(v); err == nil && n > 0 {
+				page = n
+				offset = (page - 1) * limit
+			}
 		}
 	}
 
@@ -62,9 +67,13 @@ func (s *service) handleListPosts(w http.ResponseWriter, r *http.Request) {
 	// Build PostSummary slice
 	summaries := postsToSummaries(posts)
 
-	// Build pagination
-	totalCount := s.countPublishedPosts(r.Context())
-	pagination := buildPagination(page, limit, totalCount, s.routePrefix+"/")
+	// Build pagination (omitted when ListAll is enabled)
+	var pagination *Pagination
+	if !s.cfg.ListAll {
+		totalCount := s.countPublishedPosts(r.Context())
+		p := buildPagination(page, limit, totalCount, s.routePrefix+"/")
+		pagination = &p
+	}
 
 	data := map[string]any{
 		"Posts":           summaries,
@@ -90,20 +99,25 @@ func (s *service) handleListPostsByTag(w http.ResponseWriter, r *http.Request) {
 	limit := 10
 	offset := 0
 	page := 1
-	if v := r.URL.Query().Get("limit"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil && n > 0 && n <= 100 {
-			limit = n
+
+	if s.cfg.ListAll {
+		limit = 100000
+	} else {
+		if v := r.URL.Query().Get("limit"); v != "" {
+			if n, err := strconv.Atoi(v); err == nil && n > 0 && n <= 100 {
+				limit = n
+			}
 		}
-	}
-	if v := r.URL.Query().Get("offset"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil && n >= 0 {
-			offset = n
+		if v := r.URL.Query().Get("offset"); v != "" {
+			if n, err := strconv.Atoi(v); err == nil && n >= 0 {
+				offset = n
+			}
 		}
-	}
-	if v := r.URL.Query().Get("page"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil && n > 0 {
-			page = n
-			offset = (page - 1) * limit
+		if v := r.URL.Query().Get("page"); v != "" {
+			if n, err := strconv.Atoi(v); err == nil && n > 0 {
+				page = n
+				offset = (page - 1) * limit
+			}
 		}
 	}
 
@@ -121,9 +135,13 @@ func (s *service) handleListPostsByTag(w http.ResponseWriter, r *http.Request) {
 	// Build PostSummary slice
 	summaries := postsToSummaries(posts)
 
-	// Build pagination
-	totalCount := s.countPostsByTag(r.Context(), tagSlug)
-	pagination := buildPagination(page, limit, totalCount, s.routePrefix+"/tag/"+tagSlug)
+	// Build pagination (omitted when ListAll is enabled)
+	var pagination *Pagination
+	if !s.cfg.ListAll {
+		totalCount := s.countPostsByTag(r.Context(), tagSlug)
+		p := buildPagination(page, limit, totalCount, s.routePrefix+"/tag/"+tagSlug)
+		pagination = &p
+	}
 
 	data := map[string]any{
 		"Posts":           summaries,

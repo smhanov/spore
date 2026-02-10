@@ -37,6 +37,8 @@ type Config struct {
 	// TemplatesDir is an optional directory containing custom templates (list.html, post.html).
 	// If set, templates found here override the embedded defaults.
 	TemplatesDir string
+	// ListAll disables pagination and displays every published post on a single page.
+	ListAll bool
 	// Optional metadata used for WXR export/import.
 	SiteTitle string
 	SiteDescription          string
@@ -130,6 +132,7 @@ func parseTemplates(cfg Config) (map[string]*template.Template, error) {
 		},
 		"truncate":  tplTruncate,
 		"stripHTML": tplStripHTML,
+		"now":       func() time.Time { return time.Now() },
 	}
 
 	build := func(extra ...string) (*template.Template, error) {

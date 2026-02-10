@@ -110,6 +110,11 @@ type Config struct {
     // base layout (but LayoutTemplatePath takes priority when both are set).
     TemplatesDir string
 
+    // ListAll disables pagination and displays every published post on a
+    // single page. When true, query params ?page, ?limit, and ?offset are
+    // ignored on list pages.
+    ListAll bool
+
     // Optional metadata used for WXR export/import and SEO.
     SiteTitle                string
     SiteDescription          string
@@ -557,7 +562,7 @@ Templates receive the following data:
 map[string]any{
     "Posts":           []PostSummary, // Posts with FirstImage and Excerpt populated
     "AllPosts":        []Post,        // Raw Post slice (no FirstImage/Excerpt)
-    "Pagination":      Pagination,    // Page navigation (CurrentPage, TotalPages, URLs)
+    "Pagination":      *Pagination,   // Page navigation (nil when ListAll is true)
     "RoutePrefix":     string,        // e.g., "/blog"
     "CustomCSS":       []string,      // Custom CSS URLs
     "TagSlug":         string,        // Set when filtering by tag (e.g., "golang")
@@ -615,6 +620,7 @@ The `Pagination` object:
 - `jsonEscape` — escapes a string for safe use inside JSON literals
 - `truncate` — truncates a string to a maximum number of characters, appending `…` if shortened: `{{truncate .Excerpt 100}}`
 - `stripHTML` — removes all HTML tags from a string, returning plain text: `{{stripHTML .Post.ContentHTML}}`
+- `now` — returns the current `time.Time`, useful for copyright years or "last updated" displays: `{{now.Year}}`
 
 ### Example: Custom Card Layout
 
@@ -662,6 +668,17 @@ The `Pagination` object is included in all list template data and contains:
 - `PrevPageURL` / `NextPageURL` — ready-to-use URLs (empty strings when at the boundary)
 
 The default `list.html` template includes both infinite scroll (via JavaScript) and a `<nav>` with previous/next links that work without JavaScript.
+
+To disable pagination entirely and list every post on a single page, set `ListAll: true` in your config:
+
+```go
+handler, err := blog.NewHandler(blog.Config{
+    Store:   store,
+    ListAll: true,
+})
+```
+
+When `ListAll` is enabled, `.Pagination` is `nil` in the template data, the `?page`/`?limit`/`?offset` query parameters are ignored, and all published posts are fetched in a single request.
 
 ## Admin UI
 

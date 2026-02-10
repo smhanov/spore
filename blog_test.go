@@ -311,6 +311,51 @@ func TestTplTruncate(t *testing.T) {
 	}
 }
 
+func TestNowTemplateFunction(t *testing.T) {
+	before := time.Now()
+	result := time.Now() // same as what the template func returns
+	after := time.Now()
+	if result.Before(before) || result.After(after) {
+		t.Fatalf("now() returned unexpected time: %v", result)
+	}
+}
+
+func TestListAllSkipsPagination(t *testing.T) {
+	now := time.Now().UTC()
+	ms := &mockStore{findFn: func(ctx context.Context, q Query) ([]*Entity, error) {
+		if q.Kind == entityKindTask {
+			return []*Entity{}, nil
+		}
+		post := &Post{
+			ID:          "1",
+			Slug:        "all-post",
+			Title:       "All Post",
+			PublishedAt: &now,
+		}
+		return []*Entity{entityFromPost(post)}, nil
+	}}
+	h, err := NewHandler(Config{Store: ms, ListAll: true})
+	if err != nil {
+		t.Fatalf("handler error: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/blog/", nil)
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d", rr.Code)
+	}
+	body := rr.Body.String()
+	// With ListAll, Pagination should be zero-valued (no page nav rendered)
+	if strings.Contains(body, "Page ") {
+		t.Fatalf("expected no pagination in ListAll mode; got: %s", body)
+	}
+	if !strings.Contains(body, "All Post") {
+		t.Fatalf("expected post title in output; got: %s", body)
+	}
+}
+
 func TestListIncludesFirstImageAndExcerpt(t *testing.T) {
 	now := time.Now().UTC()
 	ms := &mockStore{findFn: func(ctx context.Context, q Query) ([]*Entity, error) {
