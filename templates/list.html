@@ -29,6 +29,13 @@
 >
   {{range .Posts}}
   <article class="card post-item">
+    {{if .FirstImage}}
+    <div style="margin: -20px -20px 16px -20px; overflow: hidden; border-radius: 8px 8px 0 0">
+      <a href="{{$.RoutePrefix}}/{{.Slug}}">
+        <img src="{{.FirstImage}}" alt="{{.Title}}" style="width: 100%; height: 200px; object-fit: cover; display: block">
+      </a>
+    </div>
+    {{end}}
     <h2><a href="{{$.RoutePrefix}}/{{.Slug}}">{{.Title}}</a></h2>
     {{if .PublishedAt}}
     <p style="color: #6b7280">
@@ -36,6 +43,8 @@
     </p>
     {{end}} {{if .MetaDescription}}
     <p>{{.MetaDescription}}</p>
+    {{else if .Excerpt}}
+    <p>{{.Excerpt}}</p>
     {{end}} {{if .Tags}}
     <div style="display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px">
       {{range .Tags}}
@@ -61,6 +70,21 @@
 </div>
 <div id="post-list-loading" class="card" hidden>Loading more posts...</div>
 <div id="post-list-sentinel" style="height: 1px"></div>
+{{if .Pagination}}
+<nav style="display: flex; justify-content: space-between; padding: 16px 0">
+  {{if .Pagination.PrevPageURL}}
+  <a href="{{.Pagination.PrevPageURL}}">&larr; Previous</a>
+  {{else}}
+  <span></span>
+  {{end}}
+  <span style="color: #6b7280">Page {{.Pagination.CurrentPage}} of {{.Pagination.TotalPages}}</span>
+  {{if .Pagination.NextPageURL}}
+  <a href="{{.Pagination.NextPageURL}}">Next &rarr;</a>
+  {{else}}
+  <span></span>
+  {{end}}
+</nav>
+{{end}}
 {{end}}
 
 <script>

@@ -1,6 +1,8 @@
 package blog
 
 import (
+	"context"
+	"fmt"
 	"hash/fnv"
 	"math/rand"
 	"net/http"
@@ -28,6 +30,7 @@ func (s *service) mountPublicRoutes(r chi.Router) {
 func (s *service) handleListPosts(w http.ResponseWriter, r *http.Request) {
 	limit := 10
 	offset := 0
+	page := 1
 	if v := r.URL.Query().Get("limit"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil && n > 0 && n <= 100 {
 			limit = n
@@ -36,6 +39,12 @@ func (s *service) handleListPosts(w http.ResponseWriter, r *http.Request) {
 	if v := r.URL.Query().Get("offset"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil && n >= 0 {
 			offset = n
+		}
+	}
+	if v := r.URL.Query().Get("page"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			page = n
+			offset = (page - 1) * limit
 		}
 	}
 
@@ -50,8 +59,17 @@ func (s *service) handleListPosts(w http.ResponseWriter, r *http.Request) {
 		settings = resolveBlogSettings(rawSettings)
 	}
 
+	// Build PostSummary slice
+	summaries := postsToSummaries(posts)
+
+	// Build pagination
+	totalCount := s.countPublishedPosts(r.Context())
+	pagination := buildPagination(page, limit, totalCount, s.routePrefix+"/")
+
 	data := map[string]any{
-		"Posts":           posts,
+		"Posts":           summaries,
+		"AllPosts":        posts,
+		"Pagination":      pagination,
 		"RoutePrefix":     s.routePrefix,
 		"CustomCSS":       s.cfg.CustomCSSURLs,
 		"DateDisplay":     settings.DateDisplay,
@@ -71,6 +89,7 @@ func (s *service) handleListPostsByTag(w http.ResponseWriter, r *http.Request) {
 	tagSlug := chi.URLParam(r, "tagSlug")
 	limit := 10
 	offset := 0
+	page := 1
 	if v := r.URL.Query().Get("limit"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil && n > 0 && n <= 100 {
 			limit = n
@@ -79,6 +98,12 @@ func (s *service) handleListPostsByTag(w http.ResponseWriter, r *http.Request) {
 	if v := r.URL.Query().Get("offset"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil && n >= 0 {
 			offset = n
+		}
+	}
+	if v := r.URL.Query().Get("page"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			page = n
+			offset = (page - 1) * limit
 		}
 	}
 
@@ -93,8 +118,17 @@ func (s *service) handleListPostsByTag(w http.ResponseWriter, r *http.Request) {
 		settings = resolveBlogSettings(rawSettings)
 	}
 
+	// Build PostSummary slice
+	summaries := postsToSummaries(posts)
+
+	// Build pagination
+	totalCount := s.countPostsByTag(r.Context(), tagSlug)
+	pagination := buildPagination(page, limit, totalCount, s.routePrefix+"/tag/"+tagSlug)
+
 	data := map[string]any{
-		"Posts":           posts,
+		"Posts":           summaries,
+		"AllPosts":        posts,
+		"Pagination":      pagination,
 		"RoutePrefix":     s.routePrefix,
 		"CustomCSS":       s.cfg.CustomCSSURLs,
 		"TagSlug":         tagSlug,
@@ -315,4 +349,75 @@ func (s *service) resolveImageURL(img string) string {
 		img = "/" + img
 	}
 	return base + img
+}
+
+// postsToSummaries converts a slice of Post to PostSummary with FirstImage and Excerpt.
+func postsToSummaries(posts []Post) []PostSummary {
+	summaries := make([]PostSummary, len(posts))
+	for i, p := range posts {
+		summaries[i] = PostSummary{
+			Post:       p,
+			FirstImage: extractFirstImage(p.ContentHTML),
+			Excerpt:    trimToLength(markdownToPlainText(p.ContentMarkdown), 300),
+		}
+	}
+	return summaries
+}
+
+// buildPagination creates a Pagination struct for template use.
+func buildPagination(currentPage, perPage, totalCount int, basePath string) Pagination {
+	if perPage <= 0 {
+		perPage = 10
+	}
+	totalPages := (totalCount + perPage - 1) / perPage
+	if totalPages < 1 {
+		totalPages = 1
+	}
+	if currentPage < 1 {
+		currentPage = 1
+	}
+
+	p := Pagination{
+		CurrentPage: currentPage,
+		TotalPages:  totalPages,
+	}
+
+	if currentPage < totalPages {
+		p.NextPageURL = fmt.Sprintf("%s?page=%d&limit=%d", basePath, currentPage+1, perPage)
+	}
+	if currentPage > 1 {
+		p.PrevPageURL = fmt.Sprintf("%s?page=%d&limit=%d", basePath, currentPage-1, perPage)
+	}
+
+	return p
+}
+
+// countPublishedPosts returns the total number of published posts.
+func (s *service) countPublishedPosts(ctx context.Context) int {
+	// Use a large limit to fetch all published post IDs for counting.
+	posts, err := s.store.ListPublishedPosts(ctx, 100000, 0)
+	if err != nil {
+		return 0
+	}
+	return len(posts)
+}
+
+// countPostsByTag returns the total number of published posts with a given tag.
+func (s *service) countPostsByTag(ctx context.Context, tagSlug string) int {
+	// Use a large limit to fetch all matching posts for counting.
+	posts, err := s.store.ListPostsByTag(ctx, tagSlug, 100000, 0)
+	if err != nil {
+		return 0
+	}
+	return len(posts)
+}
+
+// tplTruncate is a template function that truncates a string to the given length.
+func tplTruncate(length int, s string) string {
+	return trimToLength(s, length)
+}
+
+// tplStripHTML is a template function that removes HTML tags from a string.
+func tplStripHTML(s string) string {
+	return strings.TrimSpace(htmlTagRe.ReplaceAllString(s, " "))
 }

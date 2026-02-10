@@ -34,6 +34,9 @@ type Config struct {
 	CustomCSSURLs       []string
 	// StaticFilePath is the optional directory from which to serve files not found as posts.
 	StaticFilePath string
+	// TemplatesDir is an optional directory containing custom templates (list.html, post.html).
+	// If set, templates found here override the embedded defaults.
+	TemplatesDir string
 	// Optional metadata used for WXR export/import.
 	SiteTitle string
 	SiteDescription          string
@@ -125,6 +128,8 @@ func parseTemplates(cfg Config) (map[string]*template.Template, error) {
 			// Strip the surrounding quotes since the template already provides them
 			return string(b[1 : len(b)-1])
 		},
+		"truncate":  tplTruncate,
+		"stripHTML": tplStripHTML,
 	}
 
 	build := func(extra ...string) (*template.Template, error) {
@@ -156,11 +161,59 @@ func parseTemplates(cfg Config) (map[string]*template.Template, error) {
 		return clone, nil
 	}
 
-	listTpl, err := build("templates/list.html")
+	loadTemplate := func(name string) (string, bool) {
+		if cfg.TemplatesDir != "" {
+			filePath := path.Join(cfg.TemplatesDir, name)
+			data, err := os.ReadFile(filePath)
+			if err == nil {
+				return string(data), true
+			}
+		}
+		return "", false
+	}
+
+	buildTpl := func(name string) (*template.Template, error) {
+		if content, ok := loadTemplate(name); ok {
+			var baseTpl *template.Template
+			if cfg.LayoutTemplatePath != "" {
+				baseContent, err := os.ReadFile(cfg.LayoutTemplatePath)
+				if err != nil {
+					return nil, fmt.Errorf("read layout template: %w", err)
+				}
+				baseTpl, err = template.New(path.Base(cfg.LayoutTemplatePath)).Funcs(funcMap).Parse(string(baseContent))
+				if err != nil {
+					return nil, fmt.Errorf("parse custom layout: %w", err)
+				}
+			} else if baseContent, ok := loadTemplate("base.html"); ok {
+				var err error
+				baseTpl, err = template.New("base.html").Funcs(funcMap).Parse(baseContent)
+				if err != nil {
+					return nil, fmt.Errorf("parse custom base: %w", err)
+				}
+			} else {
+				var err error
+				baseTpl, err = template.New("base.html").Funcs(funcMap).ParseFS(defaultTemplatesFS, "templates/base.html")
+				if err != nil {
+					return nil, err
+				}
+			}
+			clone, err := baseTpl.Clone()
+			if err != nil {
+				return nil, err
+			}
+			if _, err := clone.Parse(content); err != nil {
+				return nil, fmt.Errorf("parse custom %s: %w", name, err)
+			}
+			return clone, nil
+		}
+		return build("templates/" + name)
+	}
+
+	listTpl, err := buildTpl("list.html")
 	if err != nil {
 		return nil, err
 	}
-	postTpl, err := build("templates/post.html")
+	postTpl, err := buildTpl("post.html")
 	if err != nil {
 		return nil, err
 	}

@@ -16,6 +16,10 @@ Spore is a drop-in blogging handler for Go web apps. It renders public pages wit
 - RSS 2.0 feed with autodiscovery
 - Sitemap integration for SEO
 - Configurable date display (absolute or approximate)
+- Pagination with `?page=N` support on list pages
+- Custom template directory for full template overriding
+- Template helper functions (`truncate`, `stripHTML`) for card layouts
+- `PostSummary` data with `FirstImage` and `Excerpt` for rich card UIs
 
 ## Table of Contents
 
@@ -32,6 +36,10 @@ Spore is a drop-in blogging handler for Go web apps. It renders public pages wit
 - [Implementing the BlogStore Interface](#implementing-the-blogstore-interface)
 - [Image Storage](#image-storage)
 - [Templates](#templates)
+  - [Custom Template Directory](#3-custom-template-directory)
+  - [Template Data](#template-data)
+  - [Available Template Functions](#available-template-functions)
+- [Pagination](#pagination)
 - [Admin UI](#admin-ui)
 - [API Reference](#api-reference)
 - [Data Models](#data-models)
@@ -91,6 +99,16 @@ type Config struct {
 
     // CustomCSSURLs injects additional CSS files into rendered pages.
     CustomCSSURLs []string
+
+    // StaticFilePath is the optional directory from which to serve files
+    // not found as posts (e.g., legacy paths or downloadable assets).
+    StaticFilePath string
+
+    // TemplatesDir is an optional directory containing custom templates
+    // (list.html, post.html). If set, templates found here override the
+    // embedded defaults. A base.html here also overrides the embedded
+    // base layout (but LayoutTemplatePath takes priority when both are set).
+    TemplatesDir string
 
     // Optional metadata used for WXR export/import and SEO.
     SiteTitle                string
@@ -505,6 +523,30 @@ handler, err := blog.NewHandler(blog.Config{
 })
 ```
 
+### 3. Custom Template Directory
+
+For full control over `list.html` or `post.html`, set `TemplatesDir` to a directory containing your replacement templates:
+
+```go
+handler, err := blog.NewHandler(blog.Config{
+    Store:        store,
+    TemplatesDir: "templates/blog",
+})
+```
+
+Spore looks for templates in this order:
+
+1. **`TemplatesDir`** — if the file exists there, use it.
+2. **Embedded defaults** — fall back to the built-in template.
+
+For the base layout, priority is:
+
+1. `LayoutTemplatePath` (explicit file path)
+2. `TemplatesDir/base.html`
+3. Embedded `base.html`
+
+This means you can override just `list.html` without touching the base layout, or override everything.
+
 ### Template Data
 
 Templates receive the following data:
@@ -513,16 +555,20 @@ Templates receive the following data:
 
 ```go
 map[string]any{
-    "Posts":           []Post,      // List of published posts (with Tags populated)
-    "RoutePrefix":     string,      // e.g., "/blog"
-    "CustomCSS":       []string,    // Custom CSS URLs
-    "TagSlug":         string,      // Set when filtering by tag (e.g., "golang")
-    "DateDisplay":     string,      // "absolute" or "approximate"
-    "SiteTitle":       string,      // From Config.SiteTitle
-    "SiteURL":         string,      // From Config.SiteURL
-    "SiteDescription": string,      // From Config.SiteDescription
-    "CanonicalURL":    string,      // Full canonical URL for the page
-    "FeedURL":        string,      // Absolute URL of the RSS feed
+    "Posts":           []PostSummary, // Posts with FirstImage and Excerpt populated
+    "AllPosts":        []Post,        // Raw Post slice (no FirstImage/Excerpt)
+    "Pagination":      Pagination,    // Page navigation (CurrentPage, TotalPages, URLs)
+    "RoutePrefix":     string,        // e.g., "/blog"
+    "CustomCSS":       []string,      // Custom CSS URLs
+    "TagSlug":         string,        // Set when filtering by tag (e.g., "golang")
+    "DateDisplay":     string,        // "absolute" or "approximate"
+    "Limit":           int,           // Current page size
+    "NextOffset":      int,           // Offset for infinite-scroll continuation
+    "SiteTitle":       string,        // From Config.SiteTitle
+    "SiteURL":         string,        // From Config.SiteURL
+    "SiteDescription": string,        // From Config.SiteDescription
+    "CanonicalURL":    string,        // Full canonical URL for the page
+    "FeedURL":         string,        // Absolute URL of the RSS feed
 }
 ```
 
@@ -545,12 +591,77 @@ map[string]any{
 }
 ```
 
+Each `PostSummary` contains all `Post` fields plus:
+
+| Field        | Type     | Description                                              |
+| ------------ | -------- | -------------------------------------------------------- |
+| `FirstImage` | `string` | URL of the first `<img>` found in the rendered HTML      |
+| `Excerpt`    | `string` | Plain-text excerpt (up to 300 characters) from the body  |
+
+The `Pagination` object:
+
+| Field          | Type     | Description                                      |
+| -------------- | -------- | ------------------------------------------------ |
+| `CurrentPage`  | `int`    | The 1-based current page number                  |
+| `TotalPages`   | `int`    | Total number of pages                            |
+| `PrevPageURL`  | `string` | URL to the previous page (empty on page 1)       |
+| `NextPageURL`  | `string` | URL to the next page (empty on the last page)    |
+
 ### Available Template Functions
 
 - `safeHTML` — renders HTML content without escaping (use for `Post.ContentHTML`)
 - `formatPublishedDate` — formats a `*time.Time` according to the current `DateDisplay` setting
 - `rfc3339` — formats a `*time.Time` as an RFC 3339 string (used in SEO meta tags)
 - `jsonEscape` — escapes a string for safe use inside JSON literals
+- `truncate` — truncates a string to a maximum number of characters, appending `…` if shortened: `{{truncate .Excerpt 100}}`
+- `stripHTML` — removes all HTML tags from a string, returning plain text: `{{stripHTML .Post.ContentHTML}}`
+
+### Example: Custom Card Layout
+
+Here is a minimal `list.html` that uses `PostSummary` data and pagination to build a card grid:
+
+```html
+{{define "content"}}
+<div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 24px">
+  {{range .Posts}}
+  <article style="border: 1px solid #e5e7eb; border-radius: 8px; overflow: hidden">
+    {{if .FirstImage}}
+    <a href="{{$.RoutePrefix}}/{{.Slug}}">
+      <img src="{{.FirstImage}}" alt="{{.Title}}"
+           style="width: 100%; height: 180px; object-fit: cover">
+    </a>
+    {{end}}
+    <div style="padding: 16px">
+      <h3><a href="{{$.RoutePrefix}}/{{.Slug}}">{{.Title}}</a></h3>
+      <p>{{truncate .Excerpt 120}}</p>
+    </div>
+  </article>
+  {{end}}
+</div>
+
+{{if .Pagination}}
+<nav style="display: flex; justify-content: space-between; padding: 24px 0">
+  {{if .Pagination.PrevPageURL}}<a href="{{.Pagination.PrevPageURL}}">&larr; Previous</a>{{else}}<span></span>{{end}}
+  <span>Page {{.Pagination.CurrentPage}} of {{.Pagination.TotalPages}}</span>
+  {{if .Pagination.NextPageURL}}<a href="{{.Pagination.NextPageURL}}">Next &rarr;</a>{{else}}<span></span>{{end}}
+</nav>
+{{end}}
+{{end}}
+```
+
+Save this as `templates/blog/list.html` and set `TemplatesDir: "templates/blog"` in your config.
+
+## Pagination
+
+List pages support a `?page=N` query parameter for server-rendered pagination. The default page size is 10 posts. You can also use `?limit=N&offset=N` for programmatic access or infinite scroll.
+
+The `Pagination` object is included in all list template data and contains:
+
+- `CurrentPage` — the current page (1-based)
+- `TotalPages` — total pages based on published post count and limit
+- `PrevPageURL` / `NextPageURL` — ready-to-use URLs (empty strings when at the boundary)
+
+The default `list.html` template includes both infinite scroll (via JavaScript) and a `<nav>` with previous/next links that work without JavaScript.
 
 ## Admin UI
 
@@ -595,9 +706,9 @@ The build output in `frontend/dist` is automatically embedded when you build you
 
 | Method | Path                       | Description                                           |
 | ------ | -------------------------- | ----------------------------------------------------- |
-| GET    | `<prefix>/`                | List published posts (`?limit=N&offset=N`)            |
+| GET    | `<prefix>/`                | List published posts (`?limit=N&offset=N&page=N`)     |
 | GET    | `<prefix>/feed`            | RSS 2.0 feed of recent posts                          |
-| GET    | `<prefix>/tag/{tagSlug}`   | List published posts filtered by tag                  |
+| GET    | `<prefix>/tag/{tagSlug}`   | List published posts filtered by tag (`?page=N`)      |
 | GET    | `<prefix>/images/{id}`     | Retrieve an image by ID                               |
 | GET    | `<prefix>/{slug}`          | View a single published post (includes related posts) |
 | GET    | `<prefix>/{slug}/comments` | List comments for a post                              |
@@ -743,6 +854,31 @@ type Query struct {
     Limit   int
     Offset  int
     OrderBy string                 // e.g., "created_at DESC"
+}
+```
+
+### PostSummary
+
+Used in the list template `.Posts` for card layouts:
+
+```go
+type PostSummary struct {
+    Post
+    FirstImage string  // URL of the first <img> in the post HTML
+    Excerpt    string  // Plain-text excerpt (up to 300 characters)
+}
+```
+
+### Pagination
+
+Included in list template data as `.Pagination`:
+
+```go
+type Pagination struct {
+    CurrentPage int    // 1-based current page
+    TotalPages  int    // Total number of pages
+    NextPageURL string // URL to next page (empty on last page)
+    PrevPageURL string // URL to previous page (empty on page 1)
 }
 ```
 

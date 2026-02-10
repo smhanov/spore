@@ -67,10 +67,6 @@ func TestPublicListUsesQueryParams(t *testing.T) {
 		if q.Kind == entityKindTask {
 			return []*Entity{}, nil
 		}
-		saw = true
-		if q.Limit != 5 || q.Offset != 2 {
-			t.Fatalf("unexpected limit/offset got %d/%d", q.Limit, q.Offset)
-		}
 		if q.Kind != entityKindPost {
 			t.Fatalf("unexpected kind: %s", q.Kind)
 		}
@@ -78,6 +74,10 @@ func TestPublicListUsesQueryParams(t *testing.T) {
 			t.Fatalf("expected published filter")
 		}
 		post := &Post{ID: "1", Slug: "hello", Title: "Hello", PublishedAt: &now}
+		// The count query uses a large limit; only assert limit/offset on the primary query.
+		if q.Limit == 5 && q.Offset == 2 {
+			saw = true
+		}
 		return []*Entity{entityFromPost(post)}, nil
 	}}
 	h, err := NewHandler(Config{Store: ms})
@@ -216,5 +216,134 @@ func TestAdminSPAFallbackServesIndex(t *testing.T) {
 	}
 	if !strings.Contains(rr.Body.String(), "Blog Admin") {
 		t.Fatalf("expected admin placeholder content")
+	}
+}
+
+func TestBuildPagination(t *testing.T) {
+	// Page 1 of 3
+	p := buildPagination(1, 10, 25, "/blog/")
+	if p.CurrentPage != 1 || p.TotalPages != 3 {
+		t.Fatalf("expected page 1 of 3, got %d of %d", p.CurrentPage, p.TotalPages)
+	}
+	if p.PrevPageURL != "" {
+		t.Fatalf("expected no prev on page 1, got %s", p.PrevPageURL)
+	}
+	if p.NextPageURL == "" {
+		t.Fatal("expected next page URL on page 1")
+	}
+
+	// Page 3 of 3
+	p = buildPagination(3, 10, 25, "/blog/")
+	if p.CurrentPage != 3 || p.TotalPages != 3 {
+		t.Fatalf("expected page 3 of 3, got %d of %d", p.CurrentPage, p.TotalPages)
+	}
+	if p.NextPageURL != "" {
+		t.Fatalf("expected no next on last page, got %s", p.NextPageURL)
+	}
+	if p.PrevPageURL == "" {
+		t.Fatal("expected prev page URL on page 3")
+	}
+
+	// Single page
+	p = buildPagination(1, 10, 5, "/blog/")
+	if p.TotalPages != 1 {
+		t.Fatalf("expected 1 total page, got %d", p.TotalPages)
+	}
+	if p.NextPageURL != "" || p.PrevPageURL != "" {
+		t.Fatalf("expected no navigation on single page")
+	}
+}
+
+func TestPostsToSummaries(t *testing.T) {
+	posts := []Post{
+		{
+			ID:              "1",
+			Slug:            "test",
+			Title:           "Test Post",
+			ContentHTML:     `<p><img src="/images/hero.jpg" alt="Hero"> Hello world</p>`,
+			ContentMarkdown: "Hello world this is a test post with some content",
+		},
+		{
+			ID:              "2",
+			Slug:            "no-image",
+			Title:           "No Image",
+			ContentHTML:     "<p>Just text</p>",
+			ContentMarkdown: "Just text",
+		},
+	}
+
+	summaries := postsToSummaries(posts)
+	if len(summaries) != 2 {
+		t.Fatalf("expected 2 summaries, got %d", len(summaries))
+	}
+
+	if summaries[0].FirstImage != "/images/hero.jpg" {
+		t.Fatalf("expected first image URL, got %q", summaries[0].FirstImage)
+	}
+	if summaries[0].Excerpt == "" {
+		t.Fatal("expected non-empty excerpt")
+	}
+	if summaries[0].Title != "Test Post" {
+		t.Fatalf("expected embedded Post.Title, got %q", summaries[0].Title)
+	}
+
+	if summaries[1].FirstImage != "" {
+		t.Fatalf("expected empty first image, got %q", summaries[1].FirstImage)
+	}
+}
+
+func TestTplStripHTML(t *testing.T) {
+	input := "<p>Hello <b>world</b></p>"
+	result := tplStripHTML(input)
+	if strings.Contains(result, "<") {
+		t.Fatalf("expected no HTML tags, got %q", result)
+	}
+	if !strings.Contains(result, "Hello") || !strings.Contains(result, "world") {
+		t.Fatalf("expected text content, got %q", result)
+	}
+}
+
+func TestTplTruncate(t *testing.T) {
+	input := "Hello world this is a long string"
+	result := tplTruncate(5, input)
+	if len([]rune(result)) > 8 { // 5 chars + "..."
+		t.Fatalf("expected truncated string, got %q", result)
+	}
+}
+
+func TestListIncludesFirstImageAndExcerpt(t *testing.T) {
+	now := time.Now().UTC()
+	ms := &mockStore{findFn: func(ctx context.Context, q Query) ([]*Entity, error) {
+		if q.Kind == entityKindTask {
+			return []*Entity{}, nil
+		}
+		post := &Post{
+			ID:              "1",
+			Slug:            "img-post",
+			Title:           "Image Post",
+			ContentHTML:     `<p><img src="/images/test.jpg"> Some content here</p>`,
+			ContentMarkdown: "Some content here for the excerpt",
+			PublishedAt:     &now,
+		}
+		return []*Entity{entityFromPost(post)}, nil
+	}}
+	h, err := NewHandler(Config{Store: ms})
+	if err != nil {
+		t.Fatalf("handler error: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/blog/", nil)
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d", rr.Code)
+	}
+	body := rr.Body.String()
+	if !strings.Contains(body, "/images/test.jpg") {
+		t.Fatalf("expected first image in output; got: %s", body)
+	}
+	if !strings.Contains(body, "Page 1 of 1") {
+		t.Fatalf("expected pagination in output; got: %s", body)
 	}
 }

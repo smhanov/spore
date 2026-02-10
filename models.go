@@ -70,6 +70,21 @@ type AdminComment struct {
 	PostSlug  string `json:"post_slug" db:"post_slug"`
 }
 
+// PostSummary wraps a Post with pre-calculated fields for card/list layouts.
+type PostSummary struct {
+	Post
+	FirstImage string `json:"first_image"`
+	Excerpt    string `json:"excerpt"`
+}
+
+// Pagination holds page navigation state for list templates.
+type Pagination struct {
+	CurrentPage int    `json:"current_page"`
+	TotalPages  int    `json:"total_pages"`
+	NextPageURL string `json:"next_page_url,omitempty"`
+	PrevPageURL string `json:"prev_page_url,omitempty"`
+}
+
 // Task represents an asynchronous background task that can be persisted and resumed.
 type Task struct {
 	ID           string    `json:"id" db:"id"`
