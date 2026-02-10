@@ -604,6 +604,7 @@
               <div>
                 <h3 class="text-lg font-bold text-slate-900">Import Blog</h3>
                 <p class="text-sm text-slate-500 mt-1">Upload a WXR file. Existing posts and comments are skipped.</p>
+                <p class="text-sm text-slate-500 mt-1">Ensure the old blog location is still accessible so that we can copy its images into our database.</p>
               </div>
               <div class="flex flex-col md:flex-row md:items-center gap-3">
                 <input type="file" accept=".xml,text/xml,application/xml" @change="onWXRFileChange"

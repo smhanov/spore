@@ -393,7 +393,7 @@ type ImageStore interface {
 ```go
 imageStore, err := blog.NewFileImageStore(
     "uploads",                    // Directory to store images
-    "/blog/admin/api/images",     // URL prefix for serving images
+    "/blog/images",               // URL prefix for serving images
 )
 if err != nil {
     log.Fatal(err)
@@ -598,6 +598,7 @@ The build output in `frontend/dist` is automatically embedded when you build you
 | GET    | `<prefix>/`                | List published posts (`?limit=N&offset=N`)            |
 | GET    | `<prefix>/feed`            | RSS 2.0 feed of recent posts                          |
 | GET    | `<prefix>/tag/{tagSlug}`   | List published posts filtered by tag                  |
+| GET    | `<prefix>/images/{id}`     | Retrieve an image by ID                               |
 | GET    | `<prefix>/{slug}`          | View a single published post (includes related posts) |
 | GET    | `<prefix>/{slug}/comments` | List comments for a post                              |
 | POST   | `<prefix>/{slug}/comments` | Create a comment                                      |
@@ -628,7 +629,6 @@ All admin routes are prefixed with `<prefix>/admin/api` and protected by your `A
 | GET    | `/tasks`                | List background tasks                                      |
 | GET    | `/images/enabled`       | Check if image upload is enabled                           |
 | POST   | `/images`               | Upload an image (multipart form, field: `image`)           |
-| GET    | `/images/{id}`          | Retrieve an image                                          |
 | DELETE | `/images/{id}`          | Delete an image                                            |
 
 ### Example API Requests
@@ -827,7 +827,7 @@ func main() {
 
     // Create stores
     blogStore := blog.NewSQLXStore(db)
-    imageStore, err := blog.NewFileImageStore("uploads", "/blog/admin/api/images")
+    imageStore, err := blog.NewFileImageStore("uploads", "/blog/images")
     if err != nil {
         log.Fatal(err)
     }

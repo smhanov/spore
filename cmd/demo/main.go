@@ -265,7 +265,7 @@ func main() {
 		})
 	}
 
-	imageStore, err := blog.NewFileImageStore("images", "/blog/api/images")
+	imageStore, err := blog.NewFileImageStore("images", "/blog/images")
 	if err != nil {
 		log.Fatal(err)
 	}

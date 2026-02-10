@@ -78,18 +78,32 @@
     <link rel="stylesheet" href="{{.}}">
   {{end}}
   <style>
-    body { font-family: "Helvetica Neue", Arial, sans-serif; margin: 0; background: #f7f7f7; color: #1f2933; }
-    header { padding: 18px 24px; background: #0f172a; color: white; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, "Helvetica Neue", Arial, sans-serif; margin: 0; background: #ffffff; color: #1a1a1a; }
     a { color: #2563eb; text-decoration: none; }
     a:hover { text-decoration: underline; }
     .container { max-width: 900px; margin: 24px auto; padding: 0 16px; }
     .card { background: white; padding: 20px; border-radius: 8px; box-shadow: 0 1px 4px rgba(0,0,0,0.06); margin-bottom: 16px; }
+
+    /* Substack-style header */
+    .site-header { padding: 48px 24px 40px; text-align: center; border-bottom: 1px solid #e5e5e5; background: #ffffff; }
+    .site-header .header-inner { max-width: 680px; margin: 0 auto; }
+    .site-header .site-name { font-family: "Georgia", "Times New Roman", serif; font-size: 42px; font-weight: 700; letter-spacing: -0.02em; line-height: 1.15; margin: 0; }
+    .site-header .site-name a { color: #1a1a1a; text-decoration: none; }
+    .site-header .site-name a:hover { color: #1a1a1a; text-decoration: none; opacity: 0.8; }
+    .site-header .site-tagline { font-size: 17px; color: #6b7280; margin: 12px 0 0; line-height: 1.5; font-weight: 400; }
+
+    @media (max-width: 640px) {
+      .site-header { padding: 32px 20px 28px; }
+      .site-header .site-name { font-size: 30px; }
+      .site-header .site-tagline { font-size: 15px; }
+    }
   </style>
 </head>
 <body>
-  <header>
-    <div class="container">
-      <a href="{{.RoutePrefix}}/" style="color:white;font-weight:600;font-size:18px;">{{if .SiteTitle}}{{.SiteTitle}}{{else}}Blog{{end}}</a>
+  <header class="site-header">
+    <div class="header-inner">
+      <h1 class="site-name"><a href="{{.RoutePrefix}}/">{{if .SiteTitle}}{{.SiteTitle}}{{else}}Blog{{end}}</a></h1>
+      {{if .SiteDescription}}<p class="site-tagline">{{.SiteDescription}}</p>{{end}}
     </div>
   </header>
   <main class="container">

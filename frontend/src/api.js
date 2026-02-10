@@ -1,4 +1,5 @@
 const base = import.meta.env.BASE_URL.replace(/\/$/, '') // rely on relative paths under /blog/admin
+const publicBase = base.replace(/\/admin$/, '') // public routes are at /blog, not /blog/admin
 
 async function jsonRequest(url, options = {}) {
   const res = await fetch(url, {
@@ -124,5 +125,5 @@ export async function uploadImage(file) {
 }
 
 export function getImageUrl(id) {
-  return `${base}/api/images/${id}`
+  return `${publicBase}/images/${id}`
 }

@@ -39,7 +39,6 @@ func (s *service) mountAdminRoutes(r chi.Router) {
 		// Image endpoints (only available if ImageStore is configured)
 		r.Get("/images/enabled", s.handleImagesEnabled)
 		r.Post("/images", s.handleUploadImage)
-		r.Get("/images/{id}", s.handleGetImage)
 		r.Delete("/images/{id}", s.handleDeleteImage)
 	})
 

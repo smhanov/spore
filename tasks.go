@@ -644,10 +644,16 @@ func (s *service) downloadAndStoreImage(ctx context.Context, imageURL string) (s
 	// Limit to 50 MB.
 	limited := io.LimitReader(resp.Body, 50<<20)
 
-	newURL, err := s.cfg.ImageStore.SaveImage(ctx, id, filename, contentType, limited)
+	savedURL, err := s.cfg.ImageStore.SaveImage(ctx, id, filename, contentType, limited)
 	if err != nil {
 		return "", fmt.Errorf("store: %w", err)
 	}
+
+	// Build the public-facing URL using the blog's own route prefix
+	// rather than relying on the image store's URLPrefix, which may
+	// point at the admin path.
+	savedFilename := path.Base(savedURL)
+	newURL := s.routePrefix + "/images/" + savedFilename
 	return newURL, nil
 }
 

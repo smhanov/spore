@@ -20,7 +20,7 @@ func (s *service) mountPublicRoutes(r chi.Router) {
 	r.Get("/", s.handleListPosts)
 	r.Get("/feed", s.handleRSSFeed)
 	r.Get("/tag/{tagSlug}", s.handleListPostsByTag)
-	r.Get("/api/images/{id}", s.handleGetImage)
+	r.Get("/images/{id}", s.handleGetImage)
 	s.mountCommentRoutes(r)
 	r.Get("/*", s.handleViewPost)
 }
