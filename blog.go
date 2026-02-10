@@ -158,7 +158,9 @@ func parseTemplates(cfg Config) (map[string]*template.Template, error) {
 		if err != nil {
 			return nil, err
 		}
-		if _, err := clone.ParseFS(defaultTemplatesFS, extra...); err != nil {
+		// Always include comments.html partial.
+		allPatterns := append(extra, "templates/comments.html")
+		if _, err := clone.ParseFS(defaultTemplatesFS, allPatterns...); err != nil {
 			return nil, err
 		}
 		return clone, nil
@@ -203,6 +205,16 @@ func parseTemplates(cfg Config) (map[string]*template.Template, error) {
 			clone, err := baseTpl.Clone()
 			if err != nil {
 				return nil, err
+			}
+			// Include comments.html partial (custom override or embedded default).
+			if commentsContent, ok := loadTemplate("comments.html"); ok {
+				if _, err := clone.Parse(commentsContent); err != nil {
+					return nil, fmt.Errorf("parse custom comments.html: %w", err)
+				}
+			} else {
+				if _, err := clone.ParseFS(defaultTemplatesFS, "templates/comments.html"); err != nil {
+					return nil, fmt.Errorf("parse embedded comments.html: %w", err)
+				}
 			}
 			if _, err := clone.Parse(content); err != nil {
 				return nil, fmt.Errorf("parse custom %s: %w", name, err)

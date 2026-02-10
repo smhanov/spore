@@ -657,6 +657,29 @@ Here is a minimal `list.html` that uses `PostSummary` data and pagination to bui
 
 Save this as `templates/blog/list.html` and set `TemplatesDir: "templates/blog"` in your config.
 
+### Example: Custom Post Template with Comments
+
+The comment system (HTML, CSS, and JavaScript) is packaged as a reusable `{{template "comments" .}}` block. When writing a custom `post.html`, include it wherever you want comments to appear:
+
+```html
+{{define "content"}}
+<article style="max-width: 700px; margin: 0 auto; padding: 40px 20px">
+  <h1>{{.Post.Title}}</h1>
+  {{if .Post.PublishedAt}}
+  <p style="color: #6b7280">{{formatPublishedDate .Post.PublishedAt $.DateDisplay}}</p>
+  {{end}}
+  <div>{{safeHTML .Post.ContentHTML}}</div>
+</article>
+
+{{/* Include the built-in comment section — form, styles, and JS */}}
+{{template "comments" .}}
+{{end}} {{define "post.html"}} {{template "base.html" .}} {{end}}
+```
+
+The `comments` template requires `.Post.Slug`, `.RoutePrefix`, and `.CommentsEnabled` in the template data, all of which are provided automatically on post pages.
+
+You can also override `comments.html` itself by placing your own version in `TemplatesDir`. The template receives the same data as `post.html`.
+
 ## Pagination
 
 List pages support a `?page=N` query parameter for server-rendered pagination. The default page size is 10 posts. You can also use `?limit=N&offset=N` for programmatic access or infinite scroll.
