@@ -8,6 +8,7 @@ import (
 	htmd "github.com/JohannesKaufmann/html-to-markdown/v2"
 	"github.com/google/uuid"
 	"github.com/yuin/goldmark"
+	gmhtml "github.com/yuin/goldmark/renderer/html"
 )
 
 func generateID() string {
@@ -25,8 +26,25 @@ func hashToken(token string) string {
 
 // markdownToHTML converts markdown content to HTML using goldmark.
 func markdownToHTML(markdown string) (string, error) {
+	return markdownToHTMLWithOptions(markdown, false)
+}
+
+// markdownToHTMLUnsafe converts markdown content to HTML and allows raw HTML passthrough.
+func markdownToHTMLUnsafe(markdown string) (string, error) {
+	return markdownToHTMLWithOptions(markdown, true)
+}
+
+func markdownToHTMLWithOptions(markdown string, allowUnsafe bool) (string, error) {
 	var buf bytes.Buffer
-	if err := goldmark.Convert([]byte(markdown), &buf); err != nil {
+	md := goldmark.New()
+	if allowUnsafe {
+		md = goldmark.New(
+			goldmark.WithRendererOptions(
+				gmhtml.WithUnsafe(),
+			),
+		)
+	}
+	if err := md.Convert([]byte(markdown), &buf); err != nil {
 		return "", err
 	}
 	return buf.String(), nil

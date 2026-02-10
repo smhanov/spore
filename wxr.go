@@ -222,7 +222,7 @@ func (s *service) handleAdminExportWXR(w http.ResponseWriter, r *http.Request) {
 
 		contentHTML := strings.TrimSpace(post.ContentHTML)
 		if contentHTML == "" && strings.TrimSpace(post.ContentMarkdown) != "" {
-			if html, err := markdownToHTML(post.ContentMarkdown); err == nil {
+			if html, err := markdownToHTMLUnsafe(post.ContentMarkdown); err == nil {
 				contentHTML = html
 			} else {
 				contentHTML = post.ContentMarkdown

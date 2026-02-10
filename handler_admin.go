@@ -98,7 +98,7 @@ func (s *service) handleAdminCreatePost(w http.ResponseWriter, r *http.Request) 
 	}
 	// Convert markdown to HTML
 	if p.ContentMarkdown != "" {
-		html, err := markdownToHTML(p.ContentMarkdown)
+		html, err := markdownToHTMLUnsafe(p.ContentMarkdown)
 		if err != nil {
 			http.Error(w, "failed to convert markdown", http.StatusInternalServerError)
 			return
@@ -130,7 +130,7 @@ func (s *service) handleAdminUpdatePost(w http.ResponseWriter, r *http.Request) 
 
 	// Convert markdown to HTML
 	if p.ContentMarkdown != "" {
-		html, err := markdownToHTML(p.ContentMarkdown)
+		html, err := markdownToHTMLUnsafe(p.ContentMarkdown)
 		if err != nil {
 			http.Error(w, "failed to convert markdown", http.StatusInternalServerError)
 			return

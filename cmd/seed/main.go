@@ -12,6 +12,7 @@ import (
 	_ "github.com/mattn/go-sqlite3"
 	blog "github.com/smhanov/spore"
 	"github.com/yuin/goldmark"
+	gmhtml "github.com/yuin/goldmark/renderer/html"
 )
 
 var budgiePosts = []struct {
@@ -206,7 +207,12 @@ func buildSeedWXR() ([]byte, error) {
 	items := make([]wxrItem, 0, len(budgiePosts))
 	for i, bp := range budgiePosts {
 		var buf bytes.Buffer
-		if err := goldmark.Convert([]byte(bp.Markdown), &buf); err != nil {
+		md := goldmark.New(
+			goldmark.WithRendererOptions(
+				gmhtml.WithUnsafe(),
+			),
+		)
+		if err := md.Convert([]byte(bp.Markdown), &buf); err != nil {
 			return nil, fmt.Errorf("convert markdown for %q: %w", bp.Title, err)
 		}
 		pubDate := time.Now().Add(time.Duration(-i) * 24 * time.Hour).UTC()
