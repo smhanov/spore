@@ -223,6 +223,7 @@ func (s *service) handleGetImage(w http.ResponseWriter, r *http.Request) {
 	defer reader.Close()
 
 	w.Header().Set("Content-Type", contentType)
+	w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
 	io.Copy(w, reader)
 }
 
