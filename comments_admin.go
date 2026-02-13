@@ -10,10 +10,14 @@ import (
 )
 
 type blogSettingsPayload struct {
-	CommentsEnabled bool   `json:"comments_enabled"`
-	DateDisplay     string `json:"date_display"`
-	Title           string `json:"title"`
-	Description     string `json:"description"`
+	CommentsEnabled      bool   `json:"comments_enabled"`
+	NotificationsEnabled bool   `json:"notifications_enabled"`
+	VAPIDPublicKey       string `json:"vapid_public_key"`
+	VAPIDPrivateKey      string `json:"vapid_private_key"`
+	VAPIDSubscriber      string `json:"vapid_subscriber"`
+	DateDisplay          string `json:"date_display"`
+	Title                string `json:"title"`
+	Description          string `json:"description"`
 }
 
 func (s *service) handleAdminGetBlogSettings(w http.ResponseWriter, r *http.Request) {
@@ -29,7 +33,26 @@ func (s *service) handleAdminGetBlogSettings(w http.ResponseWriter, r *http.Requ
 		resolved := resolveBlogSettings(settings)
 		settings = &resolved
 	}
-	writeJSON(w, settings)
+	notificationsEnabled, err := s.store.GetNotificationsEnabled(r.Context())
+	if err != nil {
+		http.Error(w, "failed to load settings", http.StatusInternalServerError)
+		return
+	}
+	publicKey, privateKey, subscriber, err := s.ensurePushSettings(r.Context())
+	if err != nil {
+		http.Error(w, "failed to load settings", http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, map[string]interface{}{
+		"comments_enabled":      settings.CommentsEnabled,
+		"notifications_enabled": notificationsEnabled,
+		"vapid_public_key":      publicKey,
+		"vapid_private_key":     privateKey,
+		"vapid_subscriber":      subscriber,
+		"date_display":          settings.DateDisplay,
+		"title":                 settings.Title,
+		"description":           settings.Description,
+	})
 }
 
 func (s *service) handleAdminUpdateBlogSettings(w http.ResponseWriter, r *http.Request) {
@@ -48,7 +71,24 @@ func (s *service) handleAdminUpdateBlogSettings(w http.ResponseWriter, r *http.R
 		http.Error(w, "failed to update settings", http.StatusInternalServerError)
 		return
 	}
-	writeJSON(w, settings)
+	if err := s.store.UpdateNotificationsEnabled(r.Context(), payload.NotificationsEnabled); err != nil {
+		http.Error(w, "failed to update settings", http.StatusInternalServerError)
+		return
+	}
+	if err := s.store.UpdateVAPIDSettings(r.Context(), payload.VAPIDPublicKey, payload.VAPIDPrivateKey, payload.VAPIDSubscriber); err != nil {
+		http.Error(w, "failed to update settings", http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, map[string]interface{}{
+		"comments_enabled":      settings.CommentsEnabled,
+		"notifications_enabled": payload.NotificationsEnabled,
+		"vapid_public_key":      strings.TrimSpace(payload.VAPIDPublicKey),
+		"vapid_private_key":     strings.TrimSpace(payload.VAPIDPrivateKey),
+		"vapid_subscriber":      strings.TrimSpace(payload.VAPIDSubscriber),
+		"date_display":          settings.DateDisplay,
+		"title":                 settings.Title,
+		"description":           settings.Description,
+	})
 }
 
 func (s *service) handleAdminListComments(w http.ResponseWriter, r *http.Request) {

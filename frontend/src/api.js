@@ -61,6 +61,24 @@ export async function deleteComment(id) {
   await jsonRequest(`${base}/api/comments/${id}`, { method: 'DELETE' })
 }
 
+export async function getNotificationConfig() {
+  return jsonRequest(`${base}/api/notifications/vapid-key`)
+}
+
+export async function subscribeToNotifications(subscription) {
+  await jsonRequest(`${base}/api/notifications/subscribe`, {
+    method: 'POST',
+    body: JSON.stringify(subscription)
+  })
+}
+
+export async function unsubscribeFromNotifications(endpoint) {
+  await jsonRequest(`${base}/api/notifications/subscribe`, {
+    method: 'DELETE',
+    body: JSON.stringify({ endpoint })
+  })
+}
+
 // AI Settings API
 export async function getAISettings() {
   return jsonRequest(`${base}/api/ai/settings`)

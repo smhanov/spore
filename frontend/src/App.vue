@@ -511,6 +511,54 @@
               </div>
             </div>
 
+            <div class="bg-white border border-slate-200/60 rounded-2xl p-5 shadow-sm space-y-4">
+              <div class="flex items-center justify-between gap-4">
+                <div>
+                  <h3 class="text-lg font-bold text-slate-900">Notifications</h3>
+                  <p class="text-sm text-slate-500 mt-1">Push admins when new comments are posted.</p>
+                </div>
+                <button @click="blogSettings.notifications_enabled = !blogSettings.notifications_enabled"
+                    :class="['w-12 h-6 rounded-full relative transition-colors duration-300 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-brand-500', blogSettings.notifications_enabled ? 'bg-emerald-500' : 'bg-slate-300']">
+                  <span :class="['absolute top-1 left-1 w-4 h-4 bg-white rounded-full shadow-sm transition-transform duration-300', blogSettings.notifications_enabled ? 'translate-x-6' : 'translate-x-0']"></span>
+                </button>
+              </div>
+
+              <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+                <p class="text-xs text-slate-500">
+                  Browser permission: <span class="font-semibold text-slate-700">{{ notificationPermission }}</span> ·
+                  Subscription: <span class="font-semibold text-slate-700">{{ notificationSubscribed ? 'active' : 'inactive' }}</span>
+                </p>
+                <div class="flex gap-2">
+                  <button @click="enableBrowserNotifications" :disabled="notificationBusy || !blogSettings.notifications_enabled"
+                    :class="['px-4 py-2 rounded-lg text-xs font-semibold transition-all', (notificationBusy || !blogSettings.notifications_enabled) ? 'bg-slate-300 text-slate-500 cursor-not-allowed' : 'bg-slate-900 text-white hover:bg-slate-800']">
+                    {{ notificationBusy ? 'Working...' : 'Enable In Browser' }}
+                  </button>
+                  <button @click="disableBrowserNotifications" :disabled="notificationBusy || !notificationSubscribed"
+                    :class="['px-4 py-2 rounded-lg text-xs font-semibold transition-all', (notificationBusy || !notificationSubscribed) ? 'bg-slate-200 text-slate-500 cursor-not-allowed' : 'bg-slate-100 text-slate-700 hover:bg-slate-200']">
+                    Disable
+                  </button>
+                </div>
+              </div>
+
+              <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <div class="space-y-1">
+                  <label class="block text-xs font-semibold text-slate-600 uppercase">VAPID Public Key</label>
+                  <input v-model="blogSettings.vapid_public_key" type="text" class="w-full text-xs p-2.5 border border-slate-200 rounded-lg focus:border-brand-500 focus:ring-1 focus:ring-brand-500 outline-none" />
+                </div>
+                <div class="space-y-1">
+                  <label class="block text-xs font-semibold text-slate-600 uppercase">VAPID Private Key</label>
+                  <input v-model="blogSettings.vapid_private_key" type="text" class="w-full text-xs p-2.5 border border-slate-200 rounded-lg focus:border-brand-500 focus:ring-1 focus:ring-brand-500 outline-none" />
+                </div>
+              </div>
+
+              <div class="space-y-1">
+                <label class="block text-xs font-semibold text-slate-600 uppercase">Subscriber</label>
+                <input v-model="blogSettings.vapid_subscriber" type="text" placeholder="mailto:admin@example.com" class="w-full text-xs p-2.5 border border-slate-200 rounded-lg focus:border-brand-500 focus:ring-1 focus:ring-brand-500 outline-none" />
+              </div>
+
+              <p class="text-xs text-slate-500">If keys are blank, Spore auto-generates and stores fresh VAPID keys in settings.</p>
+            </div>
+
             <div class="bg-white border border-slate-200/60 rounded-2xl p-5 shadow-sm">
               <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
                 <div>
@@ -636,7 +684,7 @@
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
-import { listPosts, createPost, updatePost, deletePost, getAISettings, updateAISettings, sendAIChat, getBlogSettings, updateBlogSettings, listComments, updateCommentStatus, deleteComment, exportWXR, importWXR } from './api'
+import { listPosts, createPost, updatePost, deletePost, getAISettings, updateAISettings, sendAIChat, getBlogSettings, updateBlogSettings, listComments, updateCommentStatus, deleteComment, exportWXR, importWXR, getNotificationConfig, subscribeToNotifications, unsubscribeFromNotifications } from './api'
 import MarkdownEditor from './components/MarkdownEditor.vue'
 
 // --- State ---
@@ -660,9 +708,13 @@ const aiNotes = ref('')
 const aiUseSearch = ref(false)
 const aiHighlightEnabled = ref(true)
 const aiHighlight = ref(null)
-const blogSettings = ref({ comments_enabled: true, date_display: 'absolute', title: '', description: '' })
+const blogSettings = ref({ comments_enabled: true, notifications_enabled: false, vapid_public_key: '', vapid_private_key: '', vapid_subscriber: '', date_display: 'absolute', title: '', description: '' })
 const blogSettingsLoading = ref(false)
 const blogSettingsSaving = ref(false)
+const notificationConfig = ref({ supported: false, notifications_enabled: false, public_key: '', private_key: '', subscriber: '' })
+const notificationPermission = ref(typeof Notification !== 'undefined' ? Notification.permission : 'default')
+const notificationSubscribed = ref(false)
+const notificationBusy = ref(false)
 const moderationComments = ref([])
 const commentLoading = ref(false)
 const commentFilter = ref('pending')
@@ -792,7 +844,8 @@ async function loadBlogSettings() {
   blogSettingsLoading.value = true
   try {
     const result = await getBlogSettings()
-    blogSettings.value = result || { comments_enabled: true, date_display: 'absolute', title: '', description: '' }
+    blogSettings.value = result || { comments_enabled: true, notifications_enabled: false, vapid_public_key: '', vapid_private_key: '', vapid_subscriber: '', date_display: 'absolute', title: '', description: '' }
+    await loadNotificationConfig()
   } catch (err) {
     showToast('Failed to load blog settings: ' + err.message, 'error')
   } finally {
@@ -805,6 +858,10 @@ async function saveBlogSettings() {
   try {
     const result = await updateBlogSettings({
       comments_enabled: !!blogSettings.value.comments_enabled,
+      notifications_enabled: !!blogSettings.value.notifications_enabled,
+      vapid_public_key: blogSettings.value.vapid_public_key || '',
+      vapid_private_key: blogSettings.value.vapid_private_key || '',
+      vapid_subscriber: blogSettings.value.vapid_subscriber || '',
       date_display: blogSettings.value.date_display || 'absolute',
       title: blogSettings.value.title || '',
       description: blogSettings.value.description || ''
@@ -815,6 +872,116 @@ async function saveBlogSettings() {
     showToast('Failed to save blog settings: ' + err.message, 'error')
   } finally {
     blogSettingsSaving.value = false
+  }
+}
+
+async function loadNotificationConfig() {
+  try {
+    notificationConfig.value = await getNotificationConfig()
+    if (notificationConfig.value?.public_key) {
+      blogSettings.value.vapid_public_key = notificationConfig.value.public_key
+    }
+    if (notificationConfig.value?.private_key) {
+      blogSettings.value.vapid_private_key = notificationConfig.value.private_key
+    }
+    if (notificationConfig.value?.subscriber) {
+      blogSettings.value.vapid_subscriber = notificationConfig.value.subscriber
+    }
+  } catch (err) {
+    notificationConfig.value = { supported: false, notifications_enabled: false, public_key: '', private_key: '', subscriber: '' }
+  }
+  await syncNotificationState()
+}
+
+async function syncNotificationState() {
+  notificationPermission.value = typeof Notification !== 'undefined' ? Notification.permission : 'default'
+  notificationSubscribed.value = false
+  if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
+    return
+  }
+
+  try {
+    const registration = await navigator.serviceWorker.getRegistration(import.meta.env.BASE_URL)
+    if (!registration) {
+      return
+    }
+    const subscription = await registration.pushManager.getSubscription()
+    notificationSubscribed.value = !!subscription
+  } catch (err) {
+    notificationSubscribed.value = false
+  }
+}
+
+async function enableBrowserNotifications() {
+  if (!blogSettings.value.notifications_enabled) {
+    showToast('Enable Notifications in settings first', 'error')
+    return
+  }
+  notificationBusy.value = true
+  try {
+    const cfg = await getNotificationConfig()
+    notificationConfig.value = cfg || { supported: false, notifications_enabled: false, public_key: '', private_key: '', subscriber: '' }
+    if (!cfg?.supported || !cfg?.public_key) {
+      throw new Error('Push notifications are not configured on this server')
+    }
+    if (!cfg?.notifications_enabled) {
+      throw new Error('Save settings after enabling notifications, then try again')
+    }
+    if (!('serviceWorker' in navigator) || !('PushManager' in window) || typeof Notification === 'undefined') {
+      throw new Error('This browser does not support push notifications')
+    }
+
+    const permission = await Notification.requestPermission()
+    notificationPermission.value = permission
+    if (permission !== 'granted') {
+      throw new Error('Notification permission was not granted')
+    }
+
+    const scope = import.meta.env.BASE_URL
+    const registration = await navigator.serviceWorker.register(`${scope}sw.js`, { scope })
+    let subscription = await registration.pushManager.getSubscription()
+    if (!subscription) {
+      subscription = await registration.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: urlBase64ToUint8Array(cfg.public_key)
+      })
+    }
+    await subscribeToNotifications(subscription.toJSON())
+    notificationSubscribed.value = true
+    showToast('Notifications enabled for this browser')
+  } catch (err) {
+    showToast('Failed to enable notifications: ' + err.message, 'error')
+  } finally {
+    notificationBusy.value = false
+  }
+}
+
+async function disableBrowserNotifications() {
+  notificationBusy.value = true
+  try {
+    if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
+      notificationSubscribed.value = false
+      return
+    }
+    const registration = await navigator.serviceWorker.getRegistration(import.meta.env.BASE_URL)
+    if (!registration) {
+      notificationSubscribed.value = false
+      return
+    }
+    const subscription = await registration.pushManager.getSubscription()
+    if (!subscription) {
+      notificationSubscribed.value = false
+      return
+    }
+    const endpoint = subscription.endpoint
+    await subscription.unsubscribe()
+    await unsubscribeFromNotifications(endpoint)
+    notificationSubscribed.value = false
+    showToast('Notifications disabled for this browser')
+  } catch (err) {
+    showToast('Failed to disable notifications: ' + err.message, 'error')
+  } finally {
+    notificationBusy.value = false
   }
 }
 
@@ -1130,6 +1297,11 @@ onMounted(() => {
   // Load posts
   loadPosts()
   loadAISettings()
+
+  const view = new URLSearchParams(window.location.search).get('view')
+  if (view === 'comments' || view === 'list' || view === 'ai-settings' || view === 'wxr') {
+    currentView.value = view
+  }
 })
 
 watch(commentFilter, () => {
@@ -1210,6 +1382,19 @@ function normalizeAISettings(settings) {
       max_tokens: dumbMax
     }
   }
+}
+
+function urlBase64ToUint8Array(base64String) {
+  const padding = '='.repeat((4 - (base64String.length % 4)) % 4)
+  const base64 = (base64String + padding)
+    .replace(/-/g, '+')
+    .replace(/_/g, '/')
+  const rawData = window.atob(base64)
+  const outputArray = new Uint8Array(rawData.length)
+  for (let i = 0; i < rawData.length; i += 1) {
+    outputArray[i] = rawData.charCodeAt(i)
+  }
+  return outputArray
 }
 
 </script>

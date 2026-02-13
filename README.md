@@ -245,6 +245,28 @@ Validation rules: author name 2–60 characters, content 1–2,000 characters. R
 
 The admin UI provides a moderation queue where you can approve, hide, reject, or delete comments. Comments can be globally enabled or disabled from the Settings page.
 
+### Admin Push Notifications
+
+Spore supports browser push notifications for admin users when new comments are created.
+
+- In **Admin → Settings → Notifications**, enable the Notifications toggle and save.
+- Click **Enable In Browser** to register a push subscription for the current admin browser.
+- Clicking the notification opens the moderation view (`/admin?view=comments`).
+
+VAPID keys are stored in blog settings (EAV). If keys are missing, Spore automatically generates and persists a fresh keypair.
+
+You can edit the keys and subscriber in **Admin → Settings → Notifications**.
+
+Optional environment variables are still supported as a one-time bootstrap source when database settings are empty:
+
+```bash
+SPORE_VAPID_PUBLIC_KEY=...
+SPORE_VAPID_PRIVATE_KEY=...
+SPORE_VAPID_SUBSCRIBER=mailto:you@example.com
+```
+
+If both database and env values are empty, keys are generated automatically on first settings read/use.
+
 ## Date Display
 
 Posts can show either absolute dates ("Published Jan 2, 2006") or approximate dates ("Published 3 days ago"). This is configurable in the admin Settings page via the `date_display` field. The default is `"absolute"`.

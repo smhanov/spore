@@ -145,6 +145,7 @@ func (s *service) handleCreateComment(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "failed to save comment", http.StatusInternalServerError)
 		return
 	}
+	go s.notifyAdminsOfNewComment(comment, *post)
 
 	if comment.Status == "pending" {
 		go s.runCommentSpamCheck(comment, *post)

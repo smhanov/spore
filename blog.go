@@ -40,7 +40,7 @@ type Config struct {
 	// ListAll disables pagination and displays every published post on a single page.
 	ListAll bool
 	// Optional metadata used for WXR export/import.
-	SiteTitle string
+	SiteTitle                string
 	SiteDescription          string
 	SiteURL                  string
 	SiteLanguage             string
@@ -50,12 +50,15 @@ type Config struct {
 }
 
 type service struct {
-	cfg         Config
-	templates   map[string]*template.Template
-	routePrefix string
-	adminFS     fs.FS
-	tasks       *taskRunner
-	store       *storeAdapter
+	cfg            Config
+	templates      map[string]*template.Template
+	routePrefix    string
+	adminFS        fs.FS
+	tasks          *taskRunner
+	store          *storeAdapter
+	pushPublicKey  string
+	pushPrivateKey string
+	pushSubscriber string
 }
 
 // Handler serves the blog's HTTP routes and provides methods for integrating
@@ -93,6 +96,7 @@ func NewHandler(cfg Config) (*Handler, error) {
 		adminFS:     adminAssetsFS,
 		store:       newStoreAdapter(cfg.Store),
 	}
+	s.configurePushFromEnv()
 
 	r := chi.NewRouter()
 

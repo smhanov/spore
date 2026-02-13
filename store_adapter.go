@@ -2,6 +2,7 @@ package blog
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"sort"
@@ -14,9 +15,17 @@ const (
 	entityKindComment = "comment"
 	entityKindTask    = "task"
 	entityKindSetting = "setting"
+	entityKindPushSub = "admin_push_subscription"
 
 	entityIDAISettings   = "settings-ai"
 	entityIDBlogSettings = "settings-blog"
+)
+
+const (
+	attrNotificationsEnabled = "notifications_enabled"
+	attrVAPIDPublicKey       = "vapid_public_key"
+	attrVAPIDPrivateKey      = "vapid_private_key"
+	attrVAPIDSubscriber      = "vapid_subscriber"
 )
 
 type storeAdapter struct {
@@ -534,8 +543,162 @@ func (a *storeAdapter) GetBlogSettings(ctx context.Context) (*BlogSettings, erro
 }
 
 func (a *storeAdapter) UpdateBlogSettings(ctx context.Context, settings *BlogSettings) error {
-	entity := entityFromBlogSettings(settings)
+	entity, err := a.getOrCreateBlogSettingsEntity(ctx)
+	if err != nil {
+		return err
+	}
+	attrs := cloneAttributes(entity.Attrs)
+	if attrs == nil {
+		attrs = Attributes{}
+	}
+	resolved := resolveBlogSettings(settings)
+	attrs["comments_enabled"] = resolved.CommentsEnabled
+	attrs["date_display"] = resolved.DateDisplay
+	attrs["title"] = resolved.Title
+	attrs["description"] = resolved.Description
+	entity.Attrs = attrs
 	return a.store.Save(ctx, entity)
+}
+
+func (a *storeAdapter) GetNotificationsEnabled(ctx context.Context) (bool, error) {
+	entity, err := a.store.Get(ctx, entityIDBlogSettings)
+	if err != nil || entity == nil {
+		return false, err
+	}
+	if entity.Attrs == nil {
+		return false, nil
+	}
+	raw, ok := entity.Attrs[attrNotificationsEnabled]
+	if !ok || raw == nil {
+		return false, nil
+	}
+	if enabled, ok := raw.(bool); ok {
+		return enabled, nil
+	}
+	return strings.EqualFold(strings.TrimSpace(fmt.Sprint(raw)), "true"), nil
+}
+
+func (a *storeAdapter) UpdateNotificationsEnabled(ctx context.Context, enabled bool) error {
+	entity, err := a.getOrCreateBlogSettingsEntity(ctx)
+	if err != nil {
+		return err
+	}
+	attrs := cloneAttributes(entity.Attrs)
+	if attrs == nil {
+		attrs = Attributes{}
+	}
+	attrs[attrNotificationsEnabled] = enabled
+	entity.Attrs = attrs
+	return a.store.Save(ctx, entity)
+}
+
+func (a *storeAdapter) GetVAPIDSettings(ctx context.Context) (publicKey, privateKey, subscriber string, err error) {
+	entity, err := a.store.Get(ctx, entityIDBlogSettings)
+	if err != nil || entity == nil {
+		return "", "", "", err
+	}
+	if entity.Attrs == nil {
+		return "", "", "", nil
+	}
+	publicKey = strings.TrimSpace(fmt.Sprint(entity.Attrs[attrVAPIDPublicKey]))
+	privateKey = strings.TrimSpace(fmt.Sprint(entity.Attrs[attrVAPIDPrivateKey]))
+	subscriber = strings.TrimSpace(fmt.Sprint(entity.Attrs[attrVAPIDSubscriber]))
+	if publicKey == "<nil>" {
+		publicKey = ""
+	}
+	if privateKey == "<nil>" {
+		privateKey = ""
+	}
+	if subscriber == "<nil>" {
+		subscriber = ""
+	}
+	return publicKey, privateKey, subscriber, nil
+}
+
+func (a *storeAdapter) UpdateVAPIDSettings(ctx context.Context, publicKey, privateKey, subscriber string) error {
+	entity, err := a.getOrCreateBlogSettingsEntity(ctx)
+	if err != nil {
+		return err
+	}
+	attrs := cloneAttributes(entity.Attrs)
+	if attrs == nil {
+		attrs = Attributes{}
+	}
+	attrs[attrVAPIDPublicKey] = strings.TrimSpace(publicKey)
+	attrs[attrVAPIDPrivateKey] = strings.TrimSpace(privateKey)
+	attrs[attrVAPIDSubscriber] = strings.TrimSpace(subscriber)
+	entity.Attrs = attrs
+	return a.store.Save(ctx, entity)
+}
+
+type AdminPushSubscription struct {
+	ID               string
+	Endpoint         string
+	SubscriptionJSON string
+}
+
+func (a *storeAdapter) UpsertAdminPushSubscription(ctx context.Context, endpoint, subscriptionJSON string) error {
+	endpoint = strings.TrimSpace(endpoint)
+	if endpoint == "" {
+		return fmt.Errorf("subscription endpoint required")
+	}
+	subscriptionJSON = strings.TrimSpace(subscriptionJSON)
+	if subscriptionJSON == "" {
+		return fmt.Errorf("subscription payload required")
+	}
+	id := pushSubscriptionEntityID(endpoint)
+	entity := &Entity{
+		ID:      id,
+		Kind:    entityKindPushSub,
+		Status:  "active",
+		OwnerID: "admin",
+		Attrs: Attributes{
+			"endpoint":          endpoint,
+			"subscription_json": subscriptionJSON,
+		},
+	}
+	return a.store.Save(ctx, entity)
+}
+
+func (a *storeAdapter) ListAdminPushSubscriptions(ctx context.Context) ([]AdminPushSubscription, error) {
+	q := Query{
+		Kind: entityKindPushSub,
+		Filter: map[string]interface{}{
+			"status": "active",
+		},
+		Limit:   500,
+		OrderBy: "created_at DESC",
+	}
+	entities, err := a.store.Find(ctx, q)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]AdminPushSubscription, 0, len(entities))
+	for _, entity := range entities {
+		if entity == nil {
+			continue
+		}
+		endpoint := strings.TrimSpace(fmt.Sprint(entity.Attrs["endpoint"]))
+		subscription := strings.TrimSpace(fmt.Sprint(entity.Attrs["subscription_json"]))
+		if endpoint == "" || subscription == "" {
+			continue
+		}
+		out = append(out, AdminPushSubscription{
+			ID:               entity.ID,
+			Endpoint:         endpoint,
+			SubscriptionJSON: subscription,
+		})
+	}
+	return out, nil
+}
+
+func (a *storeAdapter) DeleteAdminPushSubscriptionByEndpoint(ctx context.Context, endpoint string) error {
+	endpoint = strings.TrimSpace(endpoint)
+	if endpoint == "" {
+		return nil
+	}
+	entityID := pushSubscriptionEntityID(endpoint)
+	return a.store.Delete(ctx, entityID)
 }
 
 func (a *storeAdapter) CreateComment(ctx context.Context, c *Comment) error {
@@ -923,6 +1086,45 @@ func slicePosts(posts []Post, limit, offset int) []Post {
 		end = offset + limit
 	}
 	return posts[offset:end]
+}
+
+func cloneAttributes(attrs Attributes) Attributes {
+	if attrs == nil {
+		return Attributes{}
+	}
+	out := make(Attributes, len(attrs))
+	for key, value := range attrs {
+		out[key] = value
+	}
+	return out
+}
+
+func pushSubscriptionEntityID(endpoint string) string {
+	sum := sha256.Sum256([]byte(strings.TrimSpace(endpoint)))
+	return "push-sub-" + fmt.Sprintf("%x", sum[:12])
+}
+
+func (a *storeAdapter) getOrCreateBlogSettingsEntity(ctx context.Context) (*Entity, error) {
+	entity, err := a.store.Get(ctx, entityIDBlogSettings)
+	if err != nil {
+		return nil, err
+	}
+	if entity == nil {
+		entity = &Entity{
+			ID:   entityIDBlogSettings,
+			Kind: entityKindSetting,
+			Attrs: Attributes{
+				"comments_enabled": true,
+				"date_display":     dateDisplayAbsolute,
+				"title":            "",
+				"description":      "",
+			},
+		}
+	}
+	if entity.Attrs == nil {
+		entity.Attrs = Attributes{}
+	}
+	return entity, nil
 }
 
 func tagSlugSet(tags []Tag) map[string]bool {

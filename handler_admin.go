@@ -27,6 +27,10 @@ func (s *service) mountAdminRoutes(r chi.Router) {
 		r.Put("/comments/{id}/status", s.handleAdminUpdateCommentStatus)
 		r.Delete("/comments/{id}", s.handleAdminDeleteComment)
 
+		r.Get("/notifications/vapid-key", s.handleAdminGetNotificationPublicKey)
+		r.Post("/notifications/subscribe", s.handleAdminSubscribeNotifications)
+		r.Delete("/notifications/subscribe", s.handleAdminUnsubscribeNotifications)
+
 		r.Get("/ai/settings", s.handleAdminGetAISettings)
 		r.Put("/ai/settings", s.handleAdminUpdateAISettings)
 		r.Post("/ai/chat", s.handleAdminAIChat)
