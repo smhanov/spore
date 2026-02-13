@@ -745,6 +745,7 @@ const draftPost = ref({
   slug: '',
   date: '',
   published: false,
+  publishedAt: null,
   description: '',
   content: '',
   tags: []
@@ -787,6 +788,40 @@ function showToast(message, type = 'success') {
 const formatDate = (dateStr) => {
   if (!dateStr) return 'Draft'
   return new Date(dateStr).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+}
+
+function getLocalDateString(date = new Date()) {
+  const year = date.getFullYear()
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  const day = String(date.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
+}
+
+function toLocalDateInput(isoDate) {
+  if (!isoDate) return getLocalDateString()
+  const parsed = new Date(isoDate)
+  if (Number.isNaN(parsed.getTime())) return getLocalDateString()
+  return getLocalDateString(parsed)
+}
+
+function isSameLocalDate(dateStr, isoDate) {
+  if (!dateStr || !isoDate) return false
+  return dateStr === toLocalDateInput(isoDate)
+}
+
+function buildPublishedAt(dateStr) {
+  const today = getLocalDateString()
+  if (!dateStr || dateStr === today) {
+    return new Date().toISOString()
+  }
+
+  const [year, month, day] = dateStr.split('-').map(Number)
+  if (!year || !month || !day) {
+    return new Date().toISOString()
+  }
+
+  const localNoon = new Date(year, month - 1, day, 12, 0, 0, 0)
+  return localNoon.toISOString()
 }
 
 async function loadPosts() {
@@ -1130,8 +1165,9 @@ const createNewPost = () => {
     title: '',
     subtitle: '',
     slug: '',
-    date: new Date().toISOString().split('T')[0],
+    date: getLocalDateString(),
     published: false,
+    publishedAt: null,
     description: '',
     content: '',
     tags: []
@@ -1165,8 +1201,9 @@ const editPost = (post) => {
     title: post.title || '',
     subtitle: post.subtitle || '',
     slug: post.slug || '',
-    date: post.published_at ? post.published_at.split('T')[0] : new Date().toISOString().split('T')[0],
+    date: post.published_at ? toLocalDateInput(post.published_at) : getLocalDateString(),
     published: !!post.published_at,
+    publishedAt: post.published_at || null,
     description: post.meta_description || '',
     content: post.content_markdown || '',
     tags: post.tags || []
@@ -1217,6 +1254,15 @@ async function savePost() {
   saving.value = true
   
   try {
+    let publishedAt = null
+    if (draftPost.value.published) {
+      if (draftPost.value.publishedAt && isSameLocalDate(draftPost.value.date, draftPost.value.publishedAt)) {
+        publishedAt = draftPost.value.publishedAt
+      } else {
+        publishedAt = buildPublishedAt(draftPost.value.date)
+      }
+    }
+
     // Convert editor format to API format
     const payload = {
       title: draftPost.value.title,
@@ -1225,7 +1271,7 @@ async function savePost() {
       content_markdown: draftPost.value.content,
       content_html: DOMPurify.sanitize(marked.parse(draftPost.value.content || '')),
       meta_description: draftPost.value.description,
-      published_at: draftPost.value.published ? new Date(draftPost.value.date).toISOString() : null,
+      published_at: publishedAt,
       author_id: 1
     }
 
