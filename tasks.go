@@ -265,8 +265,7 @@ func (s *service) processPostProcessing(ctx context.Context, task *Task) error {
 			} else {
 				description := parseDescriptionResponse(resp.Text())
 				if description != "" {
-					post.MetaDescription = description
-					if err := s.store.UpdatePost(ctx, &post); err != nil {
+					if err := s.updatePostDescription(ctx, post.ID, description); err != nil {
 						log.Printf("tasks: post-processing update description failed post_id=%s err=%v", post.ID, err)
 					} else {
 						filledDescriptions++
@@ -360,11 +359,33 @@ func (s *service) processGenerateDescription(ctx context.Context, task *Task) er
 		return fmt.Errorf("ai returned empty description")
 	}
 
-	post.MetaDescription = description
-	if err := s.store.UpdatePost(ctx, post); err != nil {
+	if err := s.updatePostDescription(ctx, post.ID, description); err != nil {
 		return fmt.Errorf("update post: %w", err)
 	}
 	return nil
+}
+
+func (s *service) updatePostDescription(ctx context.Context, postID, description string) error {
+	description = strings.TrimSpace(description)
+	if postID == "" || description == "" {
+		return nil
+	}
+
+	latest, err := s.store.GetPostByID(ctx, postID)
+	if err != nil {
+		return err
+	}
+	if latest == nil {
+		return nil
+	}
+
+	// Respect edits made while the AI request was running.
+	if strings.TrimSpace(latest.MetaDescription) != "" {
+		return nil
+	}
+
+	latest.MetaDescription = description
+	return s.store.UpdatePost(ctx, latest)
 }
 
 func buildDescriptionPrompt(title, content string) []*llmhub.Message {
