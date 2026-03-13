@@ -73,6 +73,17 @@
   {{end}}
 
   {{if .FeedURL}}<link rel="alternate" type="application/rss+xml" title="{{if .SiteTitle}}{{.SiteTitle}}{{else}}Blog{{end}} RSS Feed" href="{{.FeedURL}}">{{end}}
+  {{if .GoogleAnalyticsCode}}
+  <!-- Google tag (gtag.js) -->
+  <script async src="https://www.googletagmanager.com/gtag/js?id={{.GoogleAnalyticsCode}}"></script>
+  <script>
+    window.dataLayer = window.dataLayer || [];
+    function gtag(){dataLayer.push(arguments);}
+    gtag('js', new Date());
+
+    gtag('config', '{{.GoogleAnalyticsCode}}');
+  </script>
+  {{end}}
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/modern-normalize/modern-normalize.css">
   {{range .CustomCSS}}
     <link rel="stylesheet" href="{{.}}">

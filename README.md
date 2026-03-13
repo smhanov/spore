@@ -16,6 +16,7 @@ Spore is a drop-in blogging handler for Go web apps. It renders public pages wit
 - RSS 2.0 feed with autodiscovery
 - Sitemap integration for SEO
 - Configurable date display (absolute or approximate)
+- Optional Google Analytics measurement ID in admin settings
 - Pagination with `?page=N` support on list pages
 - Custom template directory for full template overriding
 - Template helper functions (`truncate`, `stripHTML`) for card layouts
@@ -256,6 +257,26 @@ Spore supports browser push notifications for admin users when new comments are 
 VAPID keys are stored in blog settings (EAV). If keys are missing, Spore automatically generates and persists a fresh keypair.
 
 You can edit the keys and subscriber in **Admin → Settings → Notifications**.
+
+### Google Analytics
+
+In **Admin → Settings → Site Identity**, you can set a Google Analytics measurement ID such as `G-3G68RLQBBB`.
+
+When present, the embedded `base.html` automatically renders the standard Google tag snippet:
+
+```html
+<!-- Google tag (gtag.js) -->
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-12345"></script>
+<script>
+    window.dataLayer = window.dataLayer || [];
+    function gtag(){dataLayer.push(arguments);}
+    gtag('js', new Date());
+
+    gtag('config', 'G-12345');
+</script>
+```
+
+If you use custom templates, the value is also available as `.GoogleAnalyticsCode` on both list and post pages.
 
 Optional environment variables are still supported as a one-time bootstrap source when database settings are empty:
 
@@ -589,6 +610,7 @@ map[string]any{
     "CustomCSS":       []string,      // Custom CSS URLs
     "TagSlug":         string,        // Set when filtering by tag (e.g., "golang")
     "DateDisplay":     string,        // "absolute" or "approximate"
+    "GoogleAnalyticsCode": string,    // Google Analytics measurement ID from settings
     "Limit":           int,           // Current page size
     "NextOffset":      int,           // Offset for infinite-scroll continuation
     "SiteTitle":       string,        // From Config.SiteTitle
@@ -609,6 +631,7 @@ map[string]any{
     "CommentsEnabled": bool,          // Whether comments are enabled
     "RelatedPosts":    []RelatedPost, // Up to 4 related posts with images/excerpts
     "DateDisplay":     string,        // "absolute" or "approximate"
+    "GoogleAnalyticsCode": string,    // Google Analytics measurement ID from settings
     "SiteTitle":       string,        // From Config.SiteTitle
     "SiteURL":         string,        // From Config.SiteURL
     "SiteDescription": string,        // From Config.SiteDescription
@@ -1002,6 +1025,9 @@ type AIProviderSettings struct {
 type BlogSettings struct {
     CommentsEnabled bool   `json:"comments_enabled"` // Default: true
     DateDisplay     string `json:"date_display"`     // "absolute" (default) or "approximate"
+    Title           string `json:"title"`
+    Description     string `json:"description"`
+    GoogleAnalyticsCode string `json:"google_analytics_code"` // e.g. "G-XXXXXXXXXX"
 }
 ```
 

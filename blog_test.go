@@ -392,3 +392,62 @@ func TestListIncludesFirstImageAndExcerpt(t *testing.T) {
 		t.Fatalf("expected pagination in output; got: %s", body)
 	}
 }
+
+func TestMarkdownTablesRenderAsHTMLTable(t *testing.T) {
+	html, err := markdownToHTMLUnsafe("| Name | Value |\n| --- | --- |\n| A | 1 |")
+	if err != nil {
+		t.Fatalf("markdown render error: %v", err)
+	}
+	if !strings.Contains(html, "<table>") {
+		t.Fatalf("expected rendered table, got %q", html)
+	}
+	if !strings.Contains(html, "<td>A</td>") {
+		t.Fatalf("expected table cell content, got %q", html)
+	}
+}
+
+func TestListPageIncludesGoogleAnalyticsSnippet(t *testing.T) {
+	now := time.Now().UTC()
+	ms := &mockStore{
+		getFn: func(ctx context.Context, id string) (*Entity, error) {
+			if id == entityIDBlogSettings {
+				return &Entity{
+					ID:   entityIDBlogSettings,
+					Kind: entityKindSetting,
+					Attrs: Attributes{
+						"comments_enabled":      true,
+						"date_display":          "absolute",
+						"google_analytics_code": "G-TESTCODE123",
+					},
+				}, nil
+			}
+			return nil, nil
+		},
+		findFn: func(ctx context.Context, q Query) ([]*Entity, error) {
+			if q.Kind == entityKindTask {
+				return []*Entity{}, nil
+			}
+			post := &Post{ID: "1", Slug: "hello", Title: "Hello", PublishedAt: &now}
+			return []*Entity{entityFromPost(post)}, nil
+		},
+	}
+	h, err := NewHandler(Config{Store: ms})
+	if err != nil {
+		t.Fatalf("handler error: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/blog/", nil)
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d", rr.Code)
+	}
+	body := rr.Body.String()
+	if !strings.Contains(body, "googletagmanager.com/gtag/js?id=G-TESTCODE123") {
+		t.Fatalf("expected Google Analytics script tag, got: %s", body)
+	}
+	if !strings.Contains(body, "gtag('config', 'G-TESTCODE123')") {
+		t.Fatalf("expected Google Analytics config call, got: %s", body)
+	}
+}

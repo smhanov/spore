@@ -29,6 +29,7 @@ func resolveBlogSettings(settings *BlogSettings) BlogSettings {
 	}
 	resolved := *settings
 	resolved.DateDisplay = normalizeDateDisplay(resolved.DateDisplay)
+	resolved.GoogleAnalyticsCode = strings.TrimSpace(resolved.GoogleAnalyticsCode)
 	return resolved
 }
 

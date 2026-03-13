@@ -8,6 +8,7 @@ import (
 	htmd "github.com/JohannesKaufmann/html-to-markdown/v2"
 	"github.com/google/uuid"
 	"github.com/yuin/goldmark"
+	"github.com/yuin/goldmark/extension"
 	gmhtml "github.com/yuin/goldmark/renderer/html"
 )
 
@@ -36,9 +37,16 @@ func markdownToHTMLUnsafe(markdown string) (string, error) {
 
 func markdownToHTMLWithOptions(markdown string, allowUnsafe bool) (string, error) {
 	var buf bytes.Buffer
-	md := goldmark.New()
+	md := goldmark.New(
+		goldmark.WithExtensions(
+			extension.Table,
+		),
+	)
 	if allowUnsafe {
 		md = goldmark.New(
+			goldmark.WithExtensions(
+				extension.Table,
+			),
 			goldmark.WithRendererOptions(
 				gmhtml.WithUnsafe(),
 			),

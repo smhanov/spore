@@ -496,6 +496,11 @@
                 <textarea v-model="blogSettings.description" rows="2" placeholder="A short description of your blog" class="w-full text-sm p-2.5 border border-slate-200 rounded-lg focus:border-brand-500 focus:ring-1 focus:ring-brand-500 outline-none resize-y"></textarea>
                 <p class="text-xs text-slate-400 mt-1">Used as the meta description for listing pages and social previews.</p>
               </div>
+              <div>
+                <label class="block text-sm font-semibold text-slate-700 mb-1">Google Analytics Measurement ID</label>
+                <input v-model="blogSettings.google_analytics_code" type="text" placeholder="G-XXXXXXXXXX" class="w-full text-sm p-2.5 border border-slate-200 rounded-lg focus:border-brand-500 focus:ring-1 focus:ring-brand-500 outline-none">
+                <p class="text-xs text-slate-400 mt-1">If set, the default templates load the Google tag automatically and custom templates can use <code>.GoogleAnalyticsCode</code>.</p>
+              </div>
             </div>
 
             <div class="bg-white border border-slate-200/60 rounded-2xl p-5 shadow-sm">
@@ -708,7 +713,7 @@ const aiNotes = ref('')
 const aiUseSearch = ref(false)
 const aiHighlightEnabled = ref(true)
 const aiHighlight = ref(null)
-const blogSettings = ref({ comments_enabled: true, notifications_enabled: false, vapid_public_key: '', vapid_private_key: '', vapid_subscriber: '', date_display: 'absolute', title: '', description: '' })
+const blogSettings = ref({ comments_enabled: true, notifications_enabled: false, vapid_public_key: '', vapid_private_key: '', vapid_subscriber: '', date_display: 'absolute', title: '', description: '', google_analytics_code: '' })
 const blogSettingsLoading = ref(false)
 const blogSettingsSaving = ref(false)
 const notificationConfig = ref({ supported: false, notifications_enabled: false, public_key: '', private_key: '', subscriber: '' })
@@ -879,7 +884,7 @@ async function loadBlogSettings() {
   blogSettingsLoading.value = true
   try {
     const result = await getBlogSettings()
-    blogSettings.value = result || { comments_enabled: true, notifications_enabled: false, vapid_public_key: '', vapid_private_key: '', vapid_subscriber: '', date_display: 'absolute', title: '', description: '' }
+    blogSettings.value = result || { comments_enabled: true, notifications_enabled: false, vapid_public_key: '', vapid_private_key: '', vapid_subscriber: '', date_display: 'absolute', title: '', description: '', google_analytics_code: '' }
     await loadNotificationConfig()
   } catch (err) {
     showToast('Failed to load blog settings: ' + err.message, 'error')
@@ -899,7 +904,8 @@ async function saveBlogSettings() {
       vapid_subscriber: blogSettings.value.vapid_subscriber || '',
       date_display: blogSettings.value.date_display || 'absolute',
       title: blogSettings.value.title || '',
-      description: blogSettings.value.description || ''
+      description: blogSettings.value.description || '',
+      google_analytics_code: blogSettings.value.google_analytics_code || ''
     })
     blogSettings.value = result || blogSettings.value
     showToast('Blog settings saved')

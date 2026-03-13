@@ -67,10 +67,11 @@ type aiSettingsAttrs struct {
 }
 
 type blogSettingsAttrs struct {
-	CommentsEnabled bool   `json:"comments_enabled"`
-	DateDisplay     string `json:"date_display"`
-	Title           string `json:"title"`
-	Description     string `json:"description"`
+	CommentsEnabled     bool   `json:"comments_enabled"`
+	DateDisplay         string `json:"date_display"`
+	Title               string `json:"title"`
+	Description         string `json:"description"`
+	GoogleAnalyticsCode string `json:"google_analytics_code"`
 }
 
 func decodeAttrs(attrs Attributes, target interface{}) error {
@@ -287,15 +288,17 @@ func entityFromBlogSettings(settings *BlogSettings) *Entity {
 		attrs.DateDisplay = settings.DateDisplay
 		attrs.Title = settings.Title
 		attrs.Description = settings.Description
+		attrs.GoogleAnalyticsCode = settings.GoogleAnalyticsCode
 	}
 	return &Entity{
 		ID:   entityIDBlogSettings,
 		Kind: entityKindSetting,
 		Attrs: Attributes{
-			"comments_enabled": attrs.CommentsEnabled,
-			"date_display":     attrs.DateDisplay,
-			"title":            attrs.Title,
-			"description":      attrs.Description,
+			"comments_enabled":      attrs.CommentsEnabled,
+			"date_display":          attrs.DateDisplay,
+			"title":                 attrs.Title,
+			"description":           attrs.Description,
+			"google_analytics_code": attrs.GoogleAnalyticsCode,
 		},
 	}
 }
@@ -309,10 +312,11 @@ func entityToBlogSettings(e *Entity) (*BlogSettings, error) {
 		return nil, err
 	}
 	return &BlogSettings{
-		CommentsEnabled: attrs.CommentsEnabled,
-		DateDisplay:     attrs.DateDisplay,
-		Title:           attrs.Title,
-		Description:     attrs.Description,
+		CommentsEnabled:     attrs.CommentsEnabled,
+		DateDisplay:         attrs.DateDisplay,
+		Title:               attrs.Title,
+		Description:         attrs.Description,
+		GoogleAnalyticsCode: attrs.GoogleAnalyticsCode,
 	}, nil
 }
 
@@ -556,6 +560,7 @@ func (a *storeAdapter) UpdateBlogSettings(ctx context.Context, settings *BlogSet
 	attrs["date_display"] = resolved.DateDisplay
 	attrs["title"] = resolved.Title
 	attrs["description"] = resolved.Description
+	attrs["google_analytics_code"] = resolved.GoogleAnalyticsCode
 	entity.Attrs = attrs
 	return a.store.Save(ctx, entity)
 }

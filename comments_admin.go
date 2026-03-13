@@ -18,6 +18,7 @@ type blogSettingsPayload struct {
 	DateDisplay          string `json:"date_display"`
 	Title                string `json:"title"`
 	Description          string `json:"description"`
+	GoogleAnalyticsCode  string `json:"google_analytics_code"`
 }
 
 func (s *service) handleAdminGetBlogSettings(w http.ResponseWriter, r *http.Request) {
@@ -52,6 +53,7 @@ func (s *service) handleAdminGetBlogSettings(w http.ResponseWriter, r *http.Requ
 		"date_display":          settings.DateDisplay,
 		"title":                 settings.Title,
 		"description":           settings.Description,
+		"google_analytics_code": settings.GoogleAnalyticsCode,
 	})
 }
 
@@ -62,10 +64,11 @@ func (s *service) handleAdminUpdateBlogSettings(w http.ResponseWriter, r *http.R
 		return
 	}
 	settings := &BlogSettings{
-		CommentsEnabled: payload.CommentsEnabled,
-		DateDisplay:     normalizeDateDisplay(payload.DateDisplay),
-		Title:           payload.Title,
-		Description:     payload.Description,
+		CommentsEnabled:     payload.CommentsEnabled,
+		DateDisplay:         normalizeDateDisplay(payload.DateDisplay),
+		Title:               payload.Title,
+		Description:         payload.Description,
+		GoogleAnalyticsCode: payload.GoogleAnalyticsCode,
 	}
 	if err := s.store.UpdateBlogSettings(r.Context(), settings); err != nil {
 		http.Error(w, "failed to update settings", http.StatusInternalServerError)
@@ -88,6 +91,7 @@ func (s *service) handleAdminUpdateBlogSettings(w http.ResponseWriter, r *http.R
 		"date_display":          settings.DateDisplay,
 		"title":                 settings.Title,
 		"description":           settings.Description,
+		"google_analytics_code": settings.GoogleAnalyticsCode,
 	})
 }
 

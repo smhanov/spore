@@ -76,19 +76,20 @@ func (s *service) handleListPosts(w http.ResponseWriter, r *http.Request) {
 	}
 
 	data := map[string]any{
-		"Posts":           summaries,
-		"AllPosts":        posts,
-		"Pagination":      pagination,
-		"RoutePrefix":     s.routePrefix,
-		"CustomCSS":       s.cfg.CustomCSSURLs,
-		"DateDisplay":     settings.DateDisplay,
-		"Limit":           limit,
-		"NextOffset":      offset + len(posts),
-		"SiteTitle":       s.effectiveTitle(settings),
-		"SiteURL":         s.cfg.SiteURL,
-		"SiteDescription": s.effectiveDescription(settings),
-		"CanonicalURL":    s.canonicalURL("/"),
-		"FeedURL":         s.canonicalURL("/feed"),
+		"Posts":               summaries,
+		"AllPosts":            posts,
+		"Pagination":          pagination,
+		"RoutePrefix":         s.routePrefix,
+		"CustomCSS":           s.cfg.CustomCSSURLs,
+		"DateDisplay":         settings.DateDisplay,
+		"GoogleAnalyticsCode": settings.GoogleAnalyticsCode,
+		"Limit":               limit,
+		"NextOffset":          offset + len(posts),
+		"SiteTitle":           s.effectiveTitle(settings),
+		"SiteURL":             s.cfg.SiteURL,
+		"SiteDescription":     s.effectiveDescription(settings),
+		"CanonicalURL":        s.canonicalURL("/"),
+		"FeedURL":             s.canonicalURL("/feed"),
 	}
 
 	s.executeTemplate(w, "list.html", data)
@@ -144,20 +145,21 @@ func (s *service) handleListPostsByTag(w http.ResponseWriter, r *http.Request) {
 	}
 
 	data := map[string]any{
-		"Posts":           summaries,
-		"AllPosts":        posts,
-		"Pagination":      pagination,
-		"RoutePrefix":     s.routePrefix,
-		"CustomCSS":       s.cfg.CustomCSSURLs,
-		"TagSlug":         tagSlug,
-		"DateDisplay":     settings.DateDisplay,
-		"Limit":           limit,
-		"NextOffset":      offset + len(posts),
-		"SiteTitle":       s.effectiveTitle(settings),
-		"SiteURL":         s.cfg.SiteURL,
-		"SiteDescription": s.effectiveDescription(settings),
-		"CanonicalURL":    s.canonicalURL("/tag/" + tagSlug),
-		"FeedURL":         s.canonicalURL("/feed"),
+		"Posts":               summaries,
+		"AllPosts":            posts,
+		"Pagination":          pagination,
+		"RoutePrefix":         s.routePrefix,
+		"CustomCSS":           s.cfg.CustomCSSURLs,
+		"TagSlug":             tagSlug,
+		"DateDisplay":         settings.DateDisplay,
+		"GoogleAnalyticsCode": settings.GoogleAnalyticsCode,
+		"Limit":               limit,
+		"NextOffset":          offset + len(posts),
+		"SiteTitle":           s.effectiveTitle(settings),
+		"SiteURL":             s.cfg.SiteURL,
+		"SiteDescription":     s.effectiveDescription(settings),
+		"CanonicalURL":        s.canonicalURL("/tag/" + tagSlug),
+		"FeedURL":             s.canonicalURL("/feed"),
 	}
 
 	s.executeTemplate(w, "list.html", data)
@@ -256,18 +258,19 @@ func (s *service) handleViewPost(w http.ResponseWriter, r *http.Request) {
 	firstImage := extractFirstImage(post.ContentHTML)
 
 	data := map[string]any{
-		"Post":            post,
-		"RoutePrefix":     s.routePrefix,
-		"CustomCSS":       s.cfg.CustomCSSURLs,
-		"CommentsEnabled": settings.CommentsEnabled,
-		"RelatedPosts":    relatedPosts,
-		"DateDisplay":     settings.DateDisplay,
-		"SiteTitle":       s.effectiveTitle(settings),
-		"SiteURL":         s.cfg.SiteURL,
-		"SiteDescription": s.effectiveDescription(settings),
-		"CanonicalURL":    s.canonicalURL("/" + post.Slug),
-		"FirstImage":      s.resolveImageURL(firstImage),
-		"FeedURL":         s.canonicalURL("/feed"),
+		"Post":                post,
+		"RoutePrefix":         s.routePrefix,
+		"CustomCSS":           s.cfg.CustomCSSURLs,
+		"CommentsEnabled":     settings.CommentsEnabled,
+		"RelatedPosts":        relatedPosts,
+		"DateDisplay":         settings.DateDisplay,
+		"GoogleAnalyticsCode": settings.GoogleAnalyticsCode,
+		"SiteTitle":           s.effectiveTitle(settings),
+		"SiteURL":             s.cfg.SiteURL,
+		"SiteDescription":     s.effectiveDescription(settings),
+		"CanonicalURL":        s.canonicalURL("/" + post.Slug),
+		"FirstImage":          s.resolveImageURL(firstImage),
+		"FeedURL":             s.canonicalURL("/feed"),
 	}
 
 	s.executeTemplate(w, "post.html", data)
