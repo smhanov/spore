@@ -119,6 +119,11 @@ export async function importWXR(file) {
   return res.json()
 }
 
+// Analytics API
+export async function getAnalytics() {
+  return jsonRequest(`${base}/api/analytics`)
+}
+
 // Image API
 export async function isImageUploadEnabled() {
   const result = await jsonRequest(`${base}/api/images/enabled`)

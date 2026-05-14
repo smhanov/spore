@@ -40,6 +40,8 @@ func (s *service) mountAdminRoutes(r chi.Router) {
 
 		r.Get("/tasks", s.handleAdminListTasks)
 
+		r.Get("/analytics", s.handleAdminListAnalytics)
+
 		// Image endpoints (only available if ImageStore is configured)
 		r.Get("/images/enabled", s.handleImagesEnabled)
 		r.Post("/images", s.handleUploadImage)
@@ -275,6 +277,44 @@ func (s *service) handleAdminListTasks(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, tasks)
+}
+
+func (s *service) handleAdminListAnalytics(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	analytics, err := s.store.ListAnalytics(ctx)
+	if err != nil {
+		http.Error(w, "failed to load analytics", http.StatusInternalServerError)
+		return
+	}
+	commentCounts, err := s.store.CountCommentsByPost(ctx)
+	if err != nil {
+		http.Error(w, "failed to load comment counts", http.StatusInternalServerError)
+		return
+	}
+	posts, err := s.store.ListAllPosts(ctx, 0, 0)
+	if err != nil {
+		http.Error(w, "failed to list posts", http.StatusInternalServerError)
+		return
+	}
+
+	out := make([]AdminPostAnalytics, 0, len(posts))
+	for i := range posts {
+		p := posts[i]
+		row := AdminPostAnalytics{
+			PostID:       p.ID,
+			PostTitle:    p.Title,
+			PostSlug:     p.Slug,
+			Status:       postStatus(&p),
+			PublishedAt:  p.PublishedAt,
+			CommentCount: commentCounts[p.ID],
+		}
+		if a, ok := analytics[p.ID]; ok && a != nil {
+			row.TotalViews = a.TotalViews
+			row.LastViewedAt = a.LastViewedAt
+		}
+		out = append(out, row)
+	}
+	writeJSON(w, out)
 }
 
 func writeJSON(w http.ResponseWriter, v any) {

@@ -17,6 +17,7 @@ Spore is a drop-in blogging handler for Go web apps. It renders public pages wit
 - Sitemap integration for SEO
 - Configurable date display (absolute or approximate)
 - Optional Google Analytics measurement ID in admin settings
+- Built-in analytics dashboard in the admin panel (per-post view counts and comment totals, sortable)
 - Pagination with `?page=N` support on list pages
 - Custom template directory for full template overriding
 - Template helper functions (`truncate`, `stripHTML`) for card layouts
@@ -31,6 +32,7 @@ Spore is a drop-in blogging handler for Go web apps. It renders public pages wit
 - [Related Posts](#related-posts)
 - [Comments](#comments)
 - [Date Display](#date-display)
+- [Analytics](#analytics)
 - [RSS Feed](#rss-feed)
 - [Sitemap](#sitemap)
 - [WXR Import / Export](#wxr-import--export)
@@ -291,6 +293,60 @@ If both database and env values are empty, keys are generated automatically on f
 ## Date Display
 
 Posts can show either absolute dates ("Published Jan 2, 2006") or approximate dates ("Published 3 days ago"). This is configurable in the admin Settings page via the `date_display` field. The default is `"absolute"`.
+
+## Analytics
+
+Spore ships with a lightweight first-party analytics dashboard so you can see which posts are getting traction without wiring up an external service.
+
+### What's tracked
+
+- **View count** — incremented each time a published post is rendered to a real visitor.
+- **Last viewed timestamp** — the most recent recorded view.
+- **Comment count** — visible (approved/pending) comments per post; hidden and rejected comments are excluded.
+
+A request is *not* counted when any of the following are true:
+
+- The `User-Agent` matches a known bot/crawler pattern (Googlebot, Bingbot, facebookexternalhit, curl, headless browsers, link-preview fetchers, etc.) or is missing.
+- The same visitor cookie (`blog_viewer_token`) already viewed the same post within the last 30 minutes — refreshing the page does not pad the counter.
+
+Increments happen asynchronously, so view tracking never blocks the page render.
+
+### Data model and migration
+
+Analytics are stored as their own entity kind (`post_analytics`) with `id = analytics-<postID>` and `owner_id = postID`, sitting next to posts in the same `blog_entities` table. **No schema migration is required** — existing databases automatically gain analytics support, and counters start at zero for posts that have not yet been viewed. The first view of a given post creates its analytics row lazily.
+
+### Viewing the dashboard
+
+Open the admin panel and click **Analytics** in the sidebar (or visit `<prefix>/admin?view=analytics` directly). The page shows total views, total comments, and a ranked table of every post with:
+
+- Click any column header (**Post**, **Views**, **Comments**, **Last viewed**) to sort by it.
+- Click the same header again to flip the direction (descending ↔ ascending).
+- A **Refresh** button reloads from the server, and a mobile-friendly dropdown is available when the headers are hidden on narrow screens.
+
+### API
+
+The dashboard is backed by a single admin endpoint:
+
+| Method | Path                       | Description                                                          |
+| ------ | -------------------------- | -------------------------------------------------------------------- |
+| GET    | `/admin/api/analytics`     | Returns `[]AdminPostAnalytics` joining post metadata + view/comment counts |
+
+Response shape:
+
+```json
+[
+  {
+    "post_id": "abc-123",
+    "post_title": "Hello, World",
+    "post_slug": "hello-world",
+    "status": "published",
+    "published_at": "2026-04-22T15:00:00Z",
+    "total_views": 142,
+    "comment_count": 7,
+    "last_viewed_at": "2026-05-14T09:12:33Z"
+  }
+]
+```
 
 ## RSS Feed
 
@@ -845,6 +901,7 @@ All admin routes are prefixed with `<prefix>/admin/api` and protected by your `A
 | GET    | `/wxr/export`           | Export all data as WXR XML                                 |
 | POST   | `/wxr/import`           | Import a WXR XML file                                      |
 | GET    | `/tasks`                | List background tasks                                      |
+| GET    | `/analytics`            | Per-post view counts and comment counts                    |
 | GET    | `/images/enabled`       | Check if image upload is enabled                           |
 | POST   | `/images`               | Upload an image (multipart form, field: `image`)           |
 | DELETE | `/images/{id}`          | Delete an image                                            |

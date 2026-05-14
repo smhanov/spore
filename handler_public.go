@@ -199,6 +199,8 @@ func (s *service) handleViewPost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	s.recordPostView(w, r, post.ID)
+
 	settings := resolveBlogSettings(nil)
 	if rawSettings, err := s.store.GetBlogSettings(r.Context()); err == nil {
 		settings = resolveBlogSettings(rawSettings)

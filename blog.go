@@ -59,6 +59,7 @@ type service struct {
 	pushPublicKey  string
 	pushPrivateKey string
 	pushSubscriber string
+	viewDedupe     *viewDedupeCache
 }
 
 // Handler serves the blog's HTTP routes and provides methods for integrating
@@ -95,6 +96,7 @@ func NewHandler(cfg Config) (*Handler, error) {
 		routePrefix: strings.TrimSuffix(routePrefix, "/"),
 		adminFS:     adminAssetsFS,
 		store:       newStoreAdapter(cfg.Store),
+		viewDedupe:  newViewDedupeCache(viewDedupeWindow),
 	}
 	s.configurePushFromEnv()
 

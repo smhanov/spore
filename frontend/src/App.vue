@@ -44,8 +44,15 @@
             </span>
           </a>
 
-          <a href="#" @click.prevent="currentView = 'ai-settings'; sidebarOpen = false" 
-             :class="['flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all duration-200 group', 
+          <a href="#" @click.prevent="currentView = 'analytics'; sidebarOpen = false"
+             :class="['flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all duration-200 group',
+             currentView === 'analytics' ? 'bg-brand-50 text-brand-700 shadow-sm ring-1 ring-brand-100' : 'text-slate-600 hover:bg-white hover:shadow-sm']">
+            <i class="ph ph-chart-bar text-lg"></i>
+            Analytics
+          </a>
+
+          <a href="#" @click.prevent="currentView = 'ai-settings'; sidebarOpen = false"
+             :class="['flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all duration-200 group',
              currentView === 'ai-settings' ? 'bg-brand-50 text-brand-700 shadow-sm ring-1 ring-brand-100' : 'text-slate-600 hover:bg-white hover:shadow-sm']">
             <i class="ph ph-brain text-lg"></i>
             AI Settings
@@ -626,6 +633,118 @@
           </div>
         </div>
 
+        <!-- VIEW: ANALYTICS -->
+        <div v-else-if="currentView === 'analytics'" class="h-full flex flex-col overflow-y-auto">
+          <div class="p-4 md:p-8 pb-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div>
+              <h2 class="text-2xl font-bold text-slate-900">Analytics</h2>
+              <p class="text-slate-500 text-sm mt-1">See your most-read posts and where conversations are happening.</p>
+            </div>
+            <div class="flex items-center gap-2">
+              <select v-model="mobileAnalyticsSortValue"
+                class="md:hidden px-3 py-2 rounded-xl text-xs font-semibold border border-slate-200 text-slate-600 bg-white">
+                <option value="views:desc">Most views</option>
+                <option value="views:asc">Fewest views</option>
+                <option value="comments:desc">Most comments</option>
+                <option value="comments:asc">Fewest comments</option>
+                <option value="last_viewed:desc">Recently viewed</option>
+                <option value="title:asc">Title A→Z</option>
+              </select>
+              <button @click="loadAnalytics" :disabled="analyticsLoading"
+                :class="['px-4 py-2 rounded-xl text-xs font-semibold border transition-all flex items-center gap-1', analyticsLoading ? 'border-slate-200 text-slate-400 cursor-not-allowed' : 'border-slate-200 text-slate-600 hover:text-slate-900']">
+                <i :class="['ph', analyticsLoading ? 'ph-spinner animate-spin' : 'ph-arrows-clockwise']"></i>
+                Refresh
+              </button>
+            </div>
+          </div>
+
+          <div class="px-4 md:px-8 pb-8 space-y-6">
+            <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              <div class="bg-white border border-slate-200/60 rounded-2xl p-5 shadow-sm">
+                <p class="text-xs font-semibold text-slate-500 uppercase">Total views</p>
+                <p class="text-3xl font-bold text-slate-900 mt-1">{{ analyticsTotals.views.toLocaleString() }}</p>
+              </div>
+              <div class="bg-white border border-slate-200/60 rounded-2xl p-5 shadow-sm">
+                <p class="text-xs font-semibold text-slate-500 uppercase">Total comments</p>
+                <p class="text-3xl font-bold text-slate-900 mt-1">{{ analyticsTotals.comments.toLocaleString() }}</p>
+              </div>
+              <div class="bg-white border border-slate-200/60 rounded-2xl p-5 shadow-sm">
+                <p class="text-xs font-semibold text-slate-500 uppercase">Tracked posts</p>
+                <p class="text-3xl font-bold text-slate-900 mt-1">{{ analyticsRows.length.toLocaleString() }}</p>
+              </div>
+            </div>
+
+            <div v-if="analyticsLoading && analyticsRows.length === 0" class="flex items-center gap-2 text-slate-500">
+              <i class="ph ph-spinner animate-spin"></i>
+              Loading analytics...
+            </div>
+
+            <div v-else-if="sortedAnalyticsRows.length === 0" class="text-sm text-slate-500 bg-white border border-slate-200/60 rounded-2xl p-5 shadow-sm">
+              No posts to report on yet. Once readers start visiting, view counts will appear here.
+            </div>
+
+            <div v-else class="bg-white border border-slate-200/60 rounded-2xl shadow-sm overflow-hidden">
+              <div class="hidden md:grid grid-cols-12 gap-3 px-5 py-3 border-b border-slate-100 bg-slate-50/60 text-xs font-semibold uppercase text-slate-500 tracking-wider select-none">
+                <button type="button" @click="toggleAnalyticsSort('title')"
+                  :class="['col-span-6 flex items-center gap-1 text-left transition-colors', analyticsSort.key === 'title' ? 'text-slate-900' : 'hover:text-slate-700']">
+                  Post
+                  <i :class="['ph text-sm', analyticsSortIcon('title'), analyticsSort.key === 'title' ? 'opacity-100' : 'opacity-50']"></i>
+                </button>
+                <button type="button" @click="toggleAnalyticsSort('views')"
+                  :class="['col-span-2 flex items-center justify-end gap-1 transition-colors', analyticsSort.key === 'views' ? 'text-slate-900' : 'hover:text-slate-700']">
+                  Views
+                  <i :class="['ph text-sm', analyticsSortIcon('views'), analyticsSort.key === 'views' ? 'opacity-100' : 'opacity-50']"></i>
+                </button>
+                <button type="button" @click="toggleAnalyticsSort('comments')"
+                  :class="['col-span-2 flex items-center justify-end gap-1 transition-colors', analyticsSort.key === 'comments' ? 'text-slate-900' : 'hover:text-slate-700']">
+                  Comments
+                  <i :class="['ph text-sm', analyticsSortIcon('comments'), analyticsSort.key === 'comments' ? 'opacity-100' : 'opacity-50']"></i>
+                </button>
+                <button type="button" @click="toggleAnalyticsSort('last_viewed')"
+                  :class="['col-span-2 flex items-center justify-end gap-1 transition-colors', analyticsSort.key === 'last_viewed' ? 'text-slate-900' : 'hover:text-slate-700']">
+                  Last viewed
+                  <i :class="['ph text-sm', analyticsSortIcon('last_viewed'), analyticsSort.key === 'last_viewed' ? 'opacity-100' : 'opacity-50']"></i>
+                </button>
+              </div>
+              <ol class="divide-y divide-slate-100">
+                <li v-for="(row, idx) in sortedAnalyticsRows" :key="row.post_id"
+                    class="grid grid-cols-1 md:grid-cols-12 gap-3 px-5 py-4 items-center">
+                  <div class="md:col-span-6 flex items-center gap-3 min-w-0">
+                    <div class="w-8 h-8 rounded-lg bg-brand-50 text-brand-600 flex items-center justify-center text-sm font-bold shrink-0">
+                      {{ idx + 1 }}
+                    </div>
+                    <div class="min-w-0">
+                      <a v-if="row.status === 'published'" :href="`/blog/${row.post_slug}`" target="_blank"
+                         class="font-semibold text-slate-900 hover:text-brand-600 truncate block">
+                        {{ row.post_title || '(Untitled)' }}
+                      </a>
+                      <span v-else class="font-semibold text-slate-900 truncate block">
+                        {{ row.post_title || '(Untitled)' }}
+                      </span>
+                      <p class="text-xs text-slate-500 font-mono truncate">/{{ row.post_slug }}</p>
+                    </div>
+                    <span v-if="row.status !== 'published'"
+                          class="ml-auto md:ml-2 px-2 py-0.5 text-[10px] font-semibold rounded-full bg-amber-50 text-amber-700 uppercase">
+                      Draft
+                    </span>
+                  </div>
+                  <div class="md:col-span-2 flex md:justify-end items-center gap-2 text-sm">
+                    <span class="md:hidden text-xs uppercase font-semibold text-slate-400">Views</span>
+                    <span class="font-bold text-slate-900">{{ row.total_views.toLocaleString() }}</span>
+                  </div>
+                  <div class="md:col-span-2 flex md:justify-end items-center gap-2 text-sm">
+                    <span class="md:hidden text-xs uppercase font-semibold text-slate-400">Comments</span>
+                    <span class="font-bold text-slate-900">{{ row.comment_count.toLocaleString() }}</span>
+                  </div>
+                  <div class="md:col-span-2 flex md:justify-end items-center text-xs text-slate-500">
+                    {{ row.last_viewed_at ? formatDate(row.last_viewed_at) : '—' }}
+                  </div>
+                </li>
+              </ol>
+            </div>
+          </div>
+        </div>
+
         <!-- VIEW: IMPORT / EXPORT -->
         <div v-else-if="currentView === 'wxr'" class="h-full flex flex-col overflow-y-auto">
           <div class="p-4 md:p-8 pb-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
@@ -689,7 +808,7 @@
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
-import { listPosts, createPost, updatePost, deletePost, getAISettings, updateAISettings, sendAIChat, getBlogSettings, updateBlogSettings, listComments, updateCommentStatus, deleteComment, exportWXR, importWXR, getNotificationConfig, subscribeToNotifications, unsubscribeFromNotifications } from './api'
+import { listPosts, createPost, updatePost, deletePost, getAISettings, updateAISettings, sendAIChat, getBlogSettings, updateBlogSettings, listComments, updateCommentStatus, deleteComment, exportWXR, importWXR, getNotificationConfig, subscribeToNotifications, unsubscribeFromNotifications, getAnalytics } from './api'
 import MarkdownEditor from './components/MarkdownEditor.vue'
 
 // --- State ---
@@ -727,6 +846,9 @@ const wxrFile = ref(null)
 const wxrExporting = ref(false)
 const wxrImporting = ref(false)
 const wxrResult = ref(null)
+const analyticsRows = ref([])
+const analyticsLoading = ref(false)
+const analyticsSort = ref({ key: 'views', dir: 'desc' })
 const commentFilters = [
   { key: 'pending', label: 'Pending' },
   { key: 'rejected', label: 'Rejected' },
@@ -773,6 +895,62 @@ const filteredPosts = computed(() => {
     if (filterStatus.value === 'draft') return matchesSearch && !post.published_at
     return matchesSearch
   })
+})
+
+const sortedAnalyticsRows = computed(() => {
+  const rows = [...analyticsRows.value]
+  const { key, dir } = analyticsSort.value
+  const mult = dir === 'asc' ? 1 : -1
+  const compare = (a, b) => {
+    if (key === 'comments') {
+      if (a.comment_count !== b.comment_count) return (a.comment_count - b.comment_count) * mult
+      return (a.total_views - b.total_views) * mult
+    }
+    if (key === 'last_viewed') {
+      const av = a.last_viewed_at ? new Date(a.last_viewed_at).getTime() : 0
+      const bv = b.last_viewed_at ? new Date(b.last_viewed_at).getTime() : 0
+      if (av !== bv) return (av - bv) * mult
+      return (a.total_views - b.total_views) * mult
+    }
+    if (key === 'title') {
+      return (a.post_title || '').localeCompare(b.post_title || '') * mult
+    }
+    if (a.total_views !== b.total_views) return (a.total_views - b.total_views) * mult
+    return (a.comment_count - b.comment_count) * mult
+  }
+  rows.sort(compare)
+  return rows
+})
+
+function toggleAnalyticsSort(key) {
+  if (analyticsSort.value.key === key) {
+    analyticsSort.value = { key, dir: analyticsSort.value.dir === 'desc' ? 'asc' : 'desc' }
+  } else {
+    analyticsSort.value = { key, dir: 'desc' }
+  }
+}
+
+function analyticsSortIcon(key) {
+  if (analyticsSort.value.key !== key) return 'ph-arrows-down-up'
+  return analyticsSort.value.dir === 'desc' ? 'ph-caret-down' : 'ph-caret-up'
+}
+
+const mobileAnalyticsSortValue = computed({
+  get: () => `${analyticsSort.value.key}:${analyticsSort.value.dir}`,
+  set: (val) => {
+    const [key, dir] = (val || 'views:desc').split(':')
+    analyticsSort.value = { key, dir }
+  }
+})
+
+const analyticsTotals = computed(() => {
+  let views = 0
+  let comments = 0
+  for (const row of analyticsRows.value) {
+    views += row.total_views || 0
+    comments += row.comment_count || 0
+  }
+  return { views, comments }
 })
 
 const seoLengthColor = computed(() => {
@@ -837,6 +1015,27 @@ async function loadPosts() {
     showToast('Failed to load posts: ' + err.message, 'error')
   } finally {
     loading.value = false
+  }
+}
+
+async function loadAnalytics() {
+  analyticsLoading.value = true
+  try {
+    const result = await getAnalytics()
+    analyticsRows.value = (result || []).map(row => ({
+      post_id: row.post_id,
+      post_title: row.post_title || '',
+      post_slug: row.post_slug || '',
+      status: row.status || '',
+      published_at: row.published_at || null,
+      total_views: row.total_views || 0,
+      comment_count: row.comment_count || 0,
+      last_viewed_at: row.last_viewed_at || null,
+    }))
+  } catch (err) {
+    showToast('Failed to load analytics: ' + err.message, 'error')
+  } finally {
+    analyticsLoading.value = false
   }
 }
 
@@ -1351,7 +1550,7 @@ onMounted(() => {
   loadAISettings()
 
   const view = new URLSearchParams(window.location.search).get('view')
-  if (view === 'comments' || view === 'list' || view === 'ai-settings' || view === 'wxr') {
+  if (view === 'comments' || view === 'list' || view === 'ai-settings' || view === 'wxr' || view === 'analytics') {
     currentView.value = view
   }
 })
@@ -1366,6 +1565,9 @@ watch(currentView, (nextView) => {
   if (nextView === 'comments') {
     loadBlogSettings()
     loadModerationComments()
+  }
+  if (nextView === 'analytics') {
+    loadAnalytics()
   }
 })
 
