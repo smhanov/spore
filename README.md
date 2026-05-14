@@ -18,6 +18,7 @@ Spore is a drop-in blogging handler for Go web apps. It renders public pages wit
 - Configurable date display (absolute or approximate)
 - Optional Google Analytics measurement ID in admin settings
 - Built-in analytics dashboard in the admin panel (per-post view counts and comment totals, sortable)
+- Built-in MCP (Model Context Protocol) server so LLM clients can manage the blog (posts, comments, analytics) over an authenticated HTTP endpoint
 - Pagination with `?page=N` support on list pages
 - Custom template directory for full template overriding
 - Template helper functions (`truncate`, `stripHTML`) for card layouts
@@ -33,6 +34,7 @@ Spore is a drop-in blogging handler for Go web apps. It renders public pages wit
 - [Comments](#comments)
 - [Date Display](#date-display)
 - [Analytics](#analytics)
+- [MCP Server](#mcp-server)
 - [RSS Feed](#rss-feed)
 - [Sitemap](#sitemap)
 - [WXR Import / Export](#wxr-import--export)
@@ -346,6 +348,79 @@ Response shape:
     "last_viewed_at": "2026-05-14T09:12:33Z"
   }
 ]
+```
+
+## MCP Server
+
+Spore ships with a [Model Context Protocol](https://modelcontextprotocol.io) server so any MCP-compatible LLM client (Claude Desktop, Claude Code, IDE plugins, custom agents) can manage your blog directly — create and edit posts, moderate comments, and read analytics — without going through the admin UI.
+
+### Endpoint and authentication
+
+- **URL:** `<SiteURL or Host>/<RoutePrefix>/mcp` (e.g. `https://example.com/blog/mcp`).
+- **Transport:** Streamable HTTP. Send JSON-RPC 2.0 requests via `POST`; responses come back as `application/json`.
+- **Auth:** every request must carry `Authorization: Bearer <api_key>`. Requests without a valid key receive `401 Unauthorized`. The server is mounted outside `/admin`, so the AdminAuthMiddleware does not apply — the bearer token is the only credential.
+
+### Managing the API key
+
+Open **Admin → MCP Server** in the admin panel to:
+
+- **Generate** a key (also visible as a one-click copy). Existing clients are invalidated when you regenerate.
+- **Revoke** the key (closes the server entirely until a new key is generated).
+- **Copy the URL** and a ready-made **JSON config snippet** to drop into your MCP client.
+
+The key is stored as an attribute on the blog settings entity (no schema migration needed). The corresponding REST endpoints, behind your normal `AdminAuthMiddleware`, are:
+
+| Method | Path                       | Description                                                  |
+| ------ | -------------------------- | ------------------------------------------------------------ |
+| GET    | `/admin/api/mcp`           | Returns `{ url, api_key, created_at, has_key, config_snippet }` |
+| POST   | `/admin/api/mcp/key`       | Generates a new API key (replaces any existing one)          |
+| DELETE | `/admin/api/mcp/key`       | Revokes the API key                                          |
+
+### Client configuration
+
+The admin UI emits a snippet of this shape — most MCP clients accept it as-is:
+
+```json
+{
+  "mcpServers": {
+    "spore-blog": {
+      "type": "http",
+      "url": "https://example.com/blog/mcp",
+      "headers": {
+        "Authorization": "Bearer spore_<random-token>"
+      }
+    }
+  }
+}
+```
+
+### Available tools
+
+| Tool                | Purpose                                                                                    |
+| ------------------- | ------------------------------------------------------------------------------------------ |
+| `list_posts`        | List posts (drafts + published), optionally filtered by status, with paging.               |
+| `get_post`          | Fetch one post by ID or slug, including full markdown body and tags.                       |
+| `create_post`       | Create a post from markdown. Supports `published` / `published_at`, tags, subtitle, etc.   |
+| `update_post`       | Partial update of any post field. Pass `published_at=null` to unpublish.                   |
+| `delete_post`       | Permanently delete a post.                                                                 |
+| `list_comments`     | Comment moderation queue (filter by status, by post).                                      |
+| `get_comment`       | Fetch a single comment by ID.                                                              |
+| `set_comment_status`| Approve / hide / reject. Use `rejected` for spam (optional `reason` is stored).            |
+| `delete_comment`    | Permanently delete a comment.                                                              |
+| `get_analytics`     | Per-post view counts + comment totals, sorted by views / comments / recency.               |
+| `list_tags`         | Distinct tags across published posts with usage counts.                                    |
+
+Tools accept JSON arguments matching the JSON Schema returned by `tools/list`, and return content as a single text block whose body is JSON — so an LLM can read the response directly or hand it to `JSON.parse`.
+
+### Example request
+
+```bash
+curl -s -X POST https://example.com/blog/mcp \
+  -H "Authorization: Bearer spore_<token>" \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/call",
+       "params":{"name":"create_post",
+                 "arguments":{"title":"Hello","content_markdown":"# Hi","published":true}}}'
 ```
 
 ## RSS Feed
@@ -902,6 +977,9 @@ All admin routes are prefixed with `<prefix>/admin/api` and protected by your `A
 | POST   | `/wxr/import`           | Import a WXR XML file                                      |
 | GET    | `/tasks`                | List background tasks                                      |
 | GET    | `/analytics`            | Per-post view counts and comment counts                    |
+| GET    | `/mcp`                  | MCP server status, URL, key, and ready-to-paste config     |
+| POST   | `/mcp/key`              | Generate (or rotate) the MCP API key                       |
+| DELETE | `/mcp/key`              | Revoke the MCP API key                                     |
 | GET    | `/images/enabled`       | Check if image upload is enabled                           |
 | POST   | `/images`               | Upload an image (multipart form, field: `image`)           |
 | DELETE | `/images/{id}`          | Delete an image                                            |

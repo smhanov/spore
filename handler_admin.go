@@ -42,6 +42,10 @@ func (s *service) mountAdminRoutes(r chi.Router) {
 
 		r.Get("/analytics", s.handleAdminListAnalytics)
 
+		r.Get("/mcp", s.handleAdminGetMCPInfo)
+		r.Post("/mcp/key", s.handleAdminGenerateMCPKey)
+		r.Delete("/mcp/key", s.handleAdminRevokeMCPKey)
+
 		// Image endpoints (only available if ImageStore is configured)
 		r.Get("/images/enabled", s.handleImagesEnabled)
 		r.Post("/images", s.handleUploadImage)

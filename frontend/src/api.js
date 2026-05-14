@@ -124,6 +124,19 @@ export async function getAnalytics() {
   return jsonRequest(`${base}/api/analytics`)
 }
 
+// MCP server management
+export async function getMCPInfo() {
+  return jsonRequest(`${base}/api/mcp`)
+}
+
+export async function generateMCPKey() {
+  return jsonRequest(`${base}/api/mcp/key`, { method: 'POST' })
+}
+
+export async function revokeMCPKey() {
+  return jsonRequest(`${base}/api/mcp/key`, { method: 'DELETE' })
+}
+
 // Image API
 export async function isImageUploadEnabled() {
   const result = await jsonRequest(`${base}/api/images/enabled`)

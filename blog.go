@@ -103,6 +103,9 @@ func NewHandler(cfg Config) (*Handler, error) {
 	r := chi.NewRouter()
 
 	r.Route(s.routePrefix, func(r chi.Router) {
+		// MCP server uses its own bearer-token auth, so register before the
+		// public catch-all and outside the admin auth middleware.
+		s.mountMCPRoutes(r)
 		s.mountPublicRoutes(r)
 
 		// Admin assets and API

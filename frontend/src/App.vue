@@ -65,8 +65,15 @@
             Settings
           </a>
 
-          <a href="#" @click.prevent="currentView = 'wxr'; sidebarOpen = false" 
-             :class="['flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all duration-200 group', 
+          <a href="#" @click.prevent="currentView = 'mcp'; sidebarOpen = false"
+             :class="['flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all duration-200 group',
+             currentView === 'mcp' ? 'bg-brand-50 text-brand-700 shadow-sm ring-1 ring-brand-100' : 'text-slate-600 hover:bg-white hover:shadow-sm']">
+            <i class="ph ph-plugs text-lg"></i>
+            MCP Server
+          </a>
+
+          <a href="#" @click.prevent="currentView = 'wxr'; sidebarOpen = false"
+             :class="['flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all duration-200 group',
              currentView === 'wxr' ? 'bg-brand-50 text-brand-700 shadow-sm ring-1 ring-brand-100' : 'text-slate-600 hover:bg-white hover:shadow-sm']">
             <i class="ph ph-arrows-clockwise text-lg"></i>
             Import / Export
@@ -745,6 +752,104 @@
           </div>
         </div>
 
+        <!-- VIEW: MCP SERVER -->
+        <div v-else-if="currentView === 'mcp'" class="h-full flex flex-col overflow-y-auto">
+          <div class="p-4 md:p-8 pb-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div>
+              <h2 class="text-2xl font-bold text-slate-900">MCP Server</h2>
+              <p class="text-slate-500 text-sm mt-1">Let an LLM client manage your blog through Spore's Model Context Protocol server.</p>
+            </div>
+          </div>
+
+          <div class="px-4 md:px-8 pb-8 space-y-6">
+            <div v-if="mcpLoading" class="flex items-center gap-2 text-slate-500">
+              <i class="ph ph-spinner animate-spin"></i> Loading...
+            </div>
+
+            <template v-else>
+              <div class="bg-white border border-slate-200/60 rounded-2xl p-5 shadow-sm space-y-3">
+                <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+                  <div>
+                    <h3 class="text-lg font-bold text-slate-900">Server endpoint</h3>
+                    <p class="text-sm text-slate-500">Point your MCP-compatible client at this URL.</p>
+                  </div>
+                  <button @click="copyToClipboard(mcpInfo.url, 'URL copied')"
+                    class="px-3 py-2 rounded-lg text-xs font-semibold border border-slate-200 text-slate-600 hover:text-slate-900 flex items-center gap-1">
+                    <i class="ph ph-copy"></i> Copy URL
+                  </button>
+                </div>
+                <code class="block bg-slate-50 border border-slate-100 rounded-lg p-3 text-sm font-mono text-slate-800 break-all">{{ mcpInfo.url }}</code>
+              </div>
+
+              <div class="bg-white border border-slate-200/60 rounded-2xl p-5 shadow-sm space-y-4">
+                <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+                  <div>
+                    <h3 class="text-lg font-bold text-slate-900">API key</h3>
+                    <p class="text-sm text-slate-500">
+                      <span v-if="mcpInfo.has_key">Issued {{ formatDate(mcpInfo.created_at) }}. Anyone with this key can manage your blog — keep it secret.</span>
+                      <span v-else>No key configured yet. Generate one to enable the MCP server.</span>
+                    </p>
+                  </div>
+                  <div class="flex flex-wrap gap-2">
+                    <button @click="generateKey" :disabled="mcpBusy"
+                      :class="['px-4 py-2 rounded-lg text-xs font-semibold transition-all', mcpBusy ? 'bg-slate-400 text-white cursor-not-allowed' : 'bg-slate-900 text-white hover:bg-slate-800']">
+                      <i v-if="mcpBusy" class="ph ph-spinner animate-spin mr-1"></i>
+                      {{ mcpInfo.has_key ? 'Regenerate' : 'Generate' }}
+                    </button>
+                    <button v-if="mcpInfo.has_key" @click="revokeKey" :disabled="mcpBusy"
+                      class="px-4 py-2 rounded-lg text-xs font-semibold border border-rose-200 text-rose-700 hover:bg-rose-50">
+                      Revoke
+                    </button>
+                  </div>
+                </div>
+
+                <div v-if="mcpInfo.has_key" class="space-y-2">
+                  <label class="block text-xs font-semibold text-slate-500 uppercase">Bearer token</label>
+                  <div class="flex items-center gap-2">
+                    <input :type="mcpKeyVisible ? 'text' : 'password'" :value="mcpInfo.api_key" readonly
+                      class="flex-1 text-sm p-2.5 border border-slate-200 rounded-lg font-mono bg-slate-50 outline-none" />
+                    <button @click="mcpKeyVisible = !mcpKeyVisible" type="button"
+                      class="px-3 py-2 rounded-lg text-xs font-semibold border border-slate-200 text-slate-600 hover:text-slate-900 flex items-center gap-1">
+                      <i :class="['ph', mcpKeyVisible ? 'ph-eye-slash' : 'ph-eye']"></i>
+                      {{ mcpKeyVisible ? 'Hide' : 'Show' }}
+                    </button>
+                    <button @click="copyToClipboard(mcpInfo.api_key, 'API key copied')" type="button"
+                      class="px-3 py-2 rounded-lg text-xs font-semibold border border-slate-200 text-slate-600 hover:text-slate-900 flex items-center gap-1">
+                      <i class="ph ph-copy"></i> Copy
+                    </button>
+                  </div>
+                  <p class="text-xs text-slate-400">Send it in the <code class="bg-slate-100 px-1 rounded">Authorization: Bearer ...</code> header.</p>
+                </div>
+              </div>
+
+              <div v-if="mcpInfo.has_key" class="bg-white border border-slate-200/60 rounded-2xl p-5 shadow-sm space-y-3">
+                <div class="flex items-center justify-between gap-3">
+                  <div>
+                    <h3 class="text-lg font-bold text-slate-900">Client configuration</h3>
+                    <p class="text-sm text-slate-500">Drop this snippet into your client's MCP config (Claude Desktop, Claude Code, IDE plugins, etc.).</p>
+                  </div>
+                  <button @click="copyToClipboard(mcpInfo.config_snippet, 'Config copied')"
+                    class="px-3 py-2 rounded-lg text-xs font-semibold border border-slate-200 text-slate-600 hover:text-slate-900 flex items-center gap-1">
+                    <i class="ph ph-copy"></i> Copy
+                  </button>
+                </div>
+                <pre class="bg-slate-900 text-slate-100 rounded-lg p-4 text-xs font-mono overflow-x-auto leading-relaxed">{{ mcpInfo.config_snippet }}</pre>
+              </div>
+
+              <div class="bg-white border border-slate-200/60 rounded-2xl p-5 shadow-sm">
+                <h3 class="text-lg font-bold text-slate-900">What tools are exposed?</h3>
+                <p class="text-sm text-slate-500 mb-3">An authenticated LLM can call any of these via the MCP server.</p>
+                <ul class="grid grid-cols-1 sm:grid-cols-2 gap-2 text-sm text-slate-700">
+                  <li class="flex items-start gap-2"><i class="ph ph-article text-brand-600 mt-0.5"></i> list_posts, get_post, create_post, update_post, delete_post</li>
+                  <li class="flex items-start gap-2"><i class="ph ph-chats-circle text-brand-600 mt-0.5"></i> list_comments, get_comment, set_comment_status, delete_comment</li>
+                  <li class="flex items-start gap-2"><i class="ph ph-chart-bar text-brand-600 mt-0.5"></i> get_analytics</li>
+                  <li class="flex items-start gap-2"><i class="ph ph-tag text-brand-600 mt-0.5"></i> list_tags</li>
+                </ul>
+              </div>
+            </template>
+          </div>
+        </div>
+
         <!-- VIEW: IMPORT / EXPORT -->
         <div v-else-if="currentView === 'wxr'" class="h-full flex flex-col overflow-y-auto">
           <div class="p-4 md:p-8 pb-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
@@ -808,7 +913,7 @@
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
-import { listPosts, createPost, updatePost, deletePost, getAISettings, updateAISettings, sendAIChat, getBlogSettings, updateBlogSettings, listComments, updateCommentStatus, deleteComment, exportWXR, importWXR, getNotificationConfig, subscribeToNotifications, unsubscribeFromNotifications, getAnalytics } from './api'
+import { listPosts, createPost, updatePost, deletePost, getAISettings, updateAISettings, sendAIChat, getBlogSettings, updateBlogSettings, listComments, updateCommentStatus, deleteComment, exportWXR, importWXR, getNotificationConfig, subscribeToNotifications, unsubscribeFromNotifications, getAnalytics, getMCPInfo, generateMCPKey, revokeMCPKey } from './api'
 import MarkdownEditor from './components/MarkdownEditor.vue'
 
 // --- State ---
@@ -849,6 +954,10 @@ const wxrResult = ref(null)
 const analyticsRows = ref([])
 const analyticsLoading = ref(false)
 const analyticsSort = ref({ key: 'views', dir: 'desc' })
+const mcpInfo = ref({ url: '', api_key: '', created_at: null, has_key: false, config_snippet: '' })
+const mcpLoading = ref(false)
+const mcpBusy = ref(false)
+const mcpKeyVisible = ref(false)
 const commentFilters = [
   { key: 'pending', label: 'Pending' },
   { key: 'rejected', label: 'Rejected' },
@@ -1015,6 +1124,66 @@ async function loadPosts() {
     showToast('Failed to load posts: ' + err.message, 'error')
   } finally {
     loading.value = false
+  }
+}
+
+async function loadMCPInfo() {
+  mcpLoading.value = true
+  try {
+    mcpInfo.value = await getMCPInfo() || mcpInfo.value
+  } catch (err) {
+    showToast('Failed to load MCP settings: ' + err.message, 'error')
+  } finally {
+    mcpLoading.value = false
+  }
+}
+
+async function generateKey() {
+  if (mcpInfo.value.has_key && !confirm('Regenerating will invalidate the current key. Continue?')) return
+  mcpBusy.value = true
+  try {
+    mcpInfo.value = await generateMCPKey()
+    mcpKeyVisible.value = true
+    showToast('API key generated')
+  } catch (err) {
+    showToast('Failed to generate key: ' + err.message, 'error')
+  } finally {
+    mcpBusy.value = false
+  }
+}
+
+async function revokeKey() {
+  if (!confirm('Revoke the API key? Existing clients will stop working.')) return
+  mcpBusy.value = true
+  try {
+    mcpInfo.value = await revokeMCPKey()
+    mcpKeyVisible.value = false
+    showToast('API key revoked')
+  } catch (err) {
+    showToast('Failed to revoke key: ' + err.message, 'error')
+  } finally {
+    mcpBusy.value = false
+  }
+}
+
+async function copyToClipboard(text, successMessage = 'Copied') {
+  if (!text) return
+  try {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      await navigator.clipboard.writeText(text)
+    } else {
+      const ta = document.createElement('textarea')
+      ta.value = text
+      ta.style.position = 'fixed'
+      ta.style.left = '-9999px'
+      document.body.appendChild(ta)
+      ta.select()
+      document.execCommand('copy')
+      document.body.removeChild(ta)
+    }
+    showToast(successMessage)
+  } catch (err) {
+    showToast('Copy failed: ' + err.message, 'error')
   }
 }
 
@@ -1550,7 +1719,7 @@ onMounted(() => {
   loadAISettings()
 
   const view = new URLSearchParams(window.location.search).get('view')
-  if (view === 'comments' || view === 'list' || view === 'ai-settings' || view === 'wxr' || view === 'analytics') {
+  if (view === 'comments' || view === 'list' || view === 'ai-settings' || view === 'wxr' || view === 'analytics' || view === 'mcp') {
     currentView.value = view
   }
 })
@@ -1568,6 +1737,9 @@ watch(currentView, (nextView) => {
   }
   if (nextView === 'analytics') {
     loadAnalytics()
+  }
+  if (nextView === 'mcp') {
+    loadMCPInfo()
   }
 })
 
