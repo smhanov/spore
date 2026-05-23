@@ -844,6 +844,7 @@
                   <li class="flex items-start gap-2"><i class="ph ph-chats-circle text-brand-600 mt-0.5"></i> list_comments, get_comment, set_comment_status, delete_comment</li>
                   <li class="flex items-start gap-2"><i class="ph ph-chart-bar text-brand-600 mt-0.5"></i> get_analytics</li>
                   <li class="flex items-start gap-2"><i class="ph ph-tag text-brand-600 mt-0.5"></i> list_tags</li>
+                  <li class="flex items-start gap-2"><i class="ph ph-image text-brand-600 mt-0.5"></i> upload_image</li>
                 </ul>
               </div>
             </template>

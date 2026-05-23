@@ -143,6 +143,12 @@ func extensionFromContentType(contentType string) string {
 		return ".gif"
 	case "image/webp":
 		return ".webp"
+	case "image/svg+xml":
+		return ".svg"
+	case "image/bmp":
+		return ".bmp"
+	case "image/x-icon", "image/vnd.microsoft.icon":
+		return ".ico"
 	default:
 		return ".bin"
 	}
@@ -158,6 +164,12 @@ func contentTypeFromExtension(ext string) string {
 		return "image/gif"
 	case ".webp":
 		return "image/webp"
+	case ".svg":
+		return "image/svg+xml"
+	case ".bmp":
+		return "image/bmp"
+	case ".ico":
+		return "image/x-icon"
 	default:
 		return "application/octet-stream"
 	}

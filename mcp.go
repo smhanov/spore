@@ -1,13 +1,16 @@
 package blog
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"crypto/subtle"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"html"
 	"net/http"
+	"path"
 	"strings"
 	"time"
 
@@ -20,7 +23,9 @@ const (
 
 	mcpProtocolVersion = "2024-11-05"
 	mcpServerName      = "spore-blog"
-	mcpServerVersion   = "0.1.0"
+	mcpServerVersion   = "0.1.1"
+
+	mcpMaxImageUploadBytes = 32 << 20
 )
 
 // ---------- API key persistence (stored alongside other blog settings) ----------
@@ -388,6 +393,20 @@ func mcpToolDefinitions() []mcpToolDef {
 				"properties": map[string]any{},
 			},
 		},
+		{
+			Name:        "upload_image",
+			Description: "Upload an image to the configured ImageStore from base64 data. Returns the public image URL plus markdown and HTML snippets for inserting into posts.",
+			InputSchema: map[string]any{
+				"type":     "object",
+				"required": []string{"filename", "data_base64"},
+				"properties": map[string]any{
+					"filename":     stringField("Original filename, including extension when possible."),
+					"content_type": stringField("Image MIME type such as image/png. Optional when data_base64 is a data URL or the filename has a known extension."),
+					"data_base64":  stringField("Base64-encoded image bytes. A data URL such as data:image/png;base64,... is also accepted."),
+					"alt":          stringField("Optional alt text used in returned markdown/html snippets."),
+				},
+			},
+		},
 	}
 }
 
@@ -415,6 +434,8 @@ func (s *service) callMCPTool(ctx context.Context, name string, args json.RawMes
 		return s.mcpGetAnalytics(ctx, args)
 	case "list_tags":
 		return s.mcpListTags(ctx, args)
+	case "upload_image":
+		return s.mcpUploadImage(ctx, args)
 	default:
 		return nil, fmt.Errorf("unknown tool: %s", name)
 	}
@@ -490,6 +511,156 @@ func detailedPost(p Post) map[string]any {
 		"tags":             tags,
 		"content_markdown": p.ContentMarkdown,
 	}
+}
+
+type mcpImageUploadInput struct {
+	Filename    string `json:"filename"`
+	ContentType string `json:"content_type"`
+	DataBase64  string `json:"data_base64"`
+	Alt         string `json:"alt"`
+}
+
+func (s *service) mcpUploadImage(ctx context.Context, args json.RawMessage) (any, error) {
+	if s.cfg.ImageStore == nil {
+		return nil, fmt.Errorf("image storage not configured")
+	}
+
+	var input mcpImageUploadInput
+	if len(args) > 0 {
+		if err := json.Unmarshal(args, &input); err != nil {
+			return nil, fmt.Errorf("invalid arguments: %w", err)
+		}
+	}
+	input.Filename = strings.TrimSpace(input.Filename)
+	input.ContentType = strings.TrimSpace(input.ContentType)
+	if input.Filename == "" {
+		return nil, fmt.Errorf("filename is required")
+	}
+
+	data, contentType, err := decodeMCPImageData(input.DataBase64, input.ContentType, input.Filename)
+	if err != nil {
+		return nil, err
+	}
+
+	storeURL, err := s.cfg.ImageStore.SaveImage(ctx, generateID(), input.Filename, contentType, bytes.NewReader(data))
+	if err != nil {
+		return nil, fmt.Errorf("save image: %w", err)
+	}
+	savedFilename := path.Base(storeURL)
+	savedID := savedFilename
+	if ext := path.Ext(savedFilename); ext != "" {
+		savedID = strings.TrimSuffix(savedFilename, ext)
+	}
+	publicURL := s.routePrefix + "/images/" + savedFilename
+	alt := strings.TrimSpace(input.Alt)
+
+	return map[string]any{
+		"id":           savedID,
+		"url":          publicURL,
+		"filename":     savedFilename,
+		"content_type": contentType,
+		"bytes":        len(data),
+		"markdown":     fmt.Sprintf("![%s](%s)", escapeMarkdownAlt(alt), publicURL),
+		"html":         fmt.Sprintf(`<img src="%s" alt="%s">`, html.EscapeString(publicURL), html.EscapeString(alt)),
+	}, nil
+}
+
+func decodeMCPImageData(raw, contentType, filename string) ([]byte, string, error) {
+	data, dataURLContentType, err := parseMCPImageDataURL(raw)
+	if err != nil {
+		return nil, "", err
+	}
+	if contentType == "" {
+		contentType = dataURLContentType
+	}
+	decoded, err := decodeMCPBase64Payload(data)
+	if err != nil {
+		return nil, "", err
+	}
+	if len(decoded) == 0 {
+		return nil, "", fmt.Errorf("data_base64 decoded to an empty image")
+	}
+	if len(decoded) > mcpMaxImageUploadBytes {
+		return nil, "", fmt.Errorf("image exceeds %d byte limit", mcpMaxImageUploadBytes)
+	}
+
+	if contentType == "" {
+		detected := http.DetectContentType(decoded[:min(len(decoded), 512)])
+		if strings.HasPrefix(strings.ToLower(detected), "image/") {
+			contentType = detected
+		}
+	}
+	if contentType == "" {
+		contentType = contentTypeFromExtension(path.Ext(filename))
+	}
+	if !strings.HasPrefix(strings.ToLower(contentType), "image/") {
+		return nil, "", fmt.Errorf("content_type must be an image MIME type")
+	}
+	return decoded, contentType, nil
+}
+
+func parseMCPImageDataURL(raw string) (string, string, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return "", "", fmt.Errorf("data_base64 is required")
+	}
+	if !strings.HasPrefix(strings.ToLower(raw), "data:") {
+		return raw, "", nil
+	}
+	comma := strings.Index(raw, ",")
+	if comma < 0 {
+		return "", "", fmt.Errorf("data_base64 data URL is missing a comma")
+	}
+	meta := raw[len("data:"):comma]
+	payload := raw[comma+1:]
+	parts := strings.Split(meta, ";")
+	if !containsStringFold(parts, "base64") {
+		return "", "", fmt.Errorf("data_base64 data URL must be base64-encoded")
+	}
+	contentType := ""
+	if len(parts) > 0 && strings.Contains(parts[0], "/") {
+		contentType = strings.TrimSpace(parts[0])
+	}
+	return payload, contentType, nil
+}
+
+func decodeMCPBase64Payload(raw string) ([]byte, error) {
+	cleaned := strings.NewReplacer("\n", "", "\r", "", "\t", "", " ", "").Replace(strings.TrimSpace(raw))
+	if cleaned == "" {
+		return nil, fmt.Errorf("data_base64 is required")
+	}
+	if base64.StdEncoding.DecodedLen(len(cleaned)) > mcpMaxImageUploadBytes {
+		return nil, fmt.Errorf("image exceeds %d byte limit", mcpMaxImageUploadBytes)
+	}
+
+	var lastErr error
+	for _, encoding := range []*base64.Encoding{
+		base64.StdEncoding,
+		base64.RawStdEncoding,
+		base64.URLEncoding,
+		base64.RawURLEncoding,
+	} {
+		decoded, err := encoding.DecodeString(cleaned)
+		if err == nil {
+			return decoded, nil
+		}
+		lastErr = err
+	}
+	return nil, fmt.Errorf("data_base64 is not valid base64: %w", lastErr)
+}
+
+func containsStringFold(values []string, want string) bool {
+	for _, value := range values {
+		if strings.EqualFold(strings.TrimSpace(value), want) {
+			return true
+		}
+	}
+	return false
+}
+
+func escapeMarkdownAlt(s string) string {
+	replacer := strings.NewReplacer(`\`, `\\`, `[`, `\[`, `]`, `\]`)
+	return replacer.Replace(s)
 }
 
 func (s *service) mcpListPosts(ctx context.Context, args json.RawMessage) (any, error) {

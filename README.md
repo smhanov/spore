@@ -18,7 +18,7 @@ Spore is a drop-in blogging handler for Go web apps. It renders public pages wit
 - Configurable date display (absolute or approximate)
 - Optional Google Analytics measurement ID in admin settings
 - Built-in analytics dashboard in the admin panel (per-post view counts and comment totals, sortable)
-- Built-in MCP (Model Context Protocol) server so LLM clients can manage the blog (posts, comments, analytics) over an authenticated HTTP endpoint
+- Built-in MCP (Model Context Protocol) server so LLM clients can manage the blog (posts, comments, analytics, and image uploads) over an authenticated HTTP endpoint
 - Pagination with `?page=N` support on list pages
 - Custom template directory for full template overriding
 - Template helper functions (`truncate`, `stripHTML`) for card layouts
@@ -352,7 +352,7 @@ Response shape:
 
 ## MCP Server
 
-Spore ships with a [Model Context Protocol](https://modelcontextprotocol.io) server so any MCP-compatible LLM client (Claude Desktop, Claude Code, IDE plugins, custom agents) can manage your blog directly — create and edit posts, moderate comments, and read analytics — without going through the admin UI.
+Spore ships with a [Model Context Protocol](https://modelcontextprotocol.io) server so any MCP-compatible LLM client (Claude Desktop, Claude Code, IDE plugins, custom agents) can manage your blog directly — create and edit posts, upload images, moderate comments, and read analytics — without going through the admin UI.
 
 ### Endpoint and authentication
 
@@ -409,10 +409,20 @@ The admin UI emits a snippet of this shape — most MCP clients accept it as-is:
 | `delete_comment`    | Permanently delete a comment.                                                              |
 | `get_analytics`     | Per-post view counts + comment totals, sorted by views / comments / recency.               |
 | `list_tags`         | Distinct tags across published posts with usage counts.                                    |
+| `upload_image`      | Upload a base64 image to the configured `ImageStore`; returns URL, markdown, and HTML.      |
 
 Tools accept JSON arguments matching the JSON Schema returned by `tools/list`, and return content as a single text block whose body is JSON — so an LLM can read the response directly or hand it to `JSON.parse`.
 
-### Example request
+`upload_image` is available only when `Config.ImageStore` is configured. It accepts:
+
+- `filename` — original filename, including an extension when possible.
+- `data_base64` — base64 image bytes, or a `data:image/png;base64,...` data URL.
+- `content_type` — optional image MIME type such as `image/png`.
+- `alt` — optional alt text used in returned snippets.
+
+The response includes `id`, `url`, `filename`, `content_type`, `bytes`, `markdown`, and `html`.
+
+### Example create-post request
 
 ```bash
 curl -s -X POST https://example.com/blog/mcp \
@@ -421,6 +431,21 @@ curl -s -X POST https://example.com/blog/mcp \
   -d '{"jsonrpc":"2.0","id":1,"method":"tools/call",
        "params":{"name":"create_post",
                  "arguments":{"title":"Hello","content_markdown":"# Hi","published":true}}}'
+```
+
+### Example image-upload request
+
+```bash
+BASE64_IMAGE="$(base64 -w 0 photo.jpg)"
+curl -s -X POST https://example.com/blog/mcp \
+  -H "Authorization: Bearer spore_<token>" \
+  -H "Content-Type: application/json" \
+  -d "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/call\",
+       \"params\":{\"name\":\"upload_image\",
+                  \"arguments\":{\"filename\":\"photo.jpg\",
+                                 \"content_type\":\"image/jpeg\",
+                                 \"data_base64\":\"${BASE64_IMAGE}\",
+                                 \"alt\":\"Post header\"}}}"
 ```
 
 ## RSS Feed
@@ -570,7 +595,7 @@ func (m *memoryStore) Delete(ctx context.Context, id string) error {
 
 ## Image Storage
 
-Spore supports optional image uploads through the `ImageStore` interface:
+Spore supports optional image uploads through the `ImageStore` interface. When configured, images can be uploaded from the admin UI, the admin REST endpoint, and the MCP `upload_image` tool.
 
 ```go
 type ImageStore interface {

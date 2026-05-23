@@ -134,8 +134,8 @@ func TestMCPInitializeAndListTools(t *testing.T) {
 	})
 	result, _ = resp.Result.(map[string]any)
 	tools, _ := result["tools"].([]any)
-	if len(tools) < 8 {
-		t.Fatalf("tools count = %d want at least 8", len(tools))
+	if len(tools) < 9 {
+		t.Fatalf("tools count = %d want at least 9", len(tools))
 	}
 	names := map[string]bool{}
 	for _, raw := range tools {
@@ -143,10 +143,90 @@ func TestMCPInitializeAndListTools(t *testing.T) {
 		name, _ := tool["name"].(string)
 		names[name] = true
 	}
-	for _, expected := range []string{"list_posts", "create_post", "update_post", "delete_post", "list_comments", "set_comment_status", "get_analytics", "list_tags"} {
+	for _, expected := range []string{"list_posts", "create_post", "update_post", "delete_post", "list_comments", "set_comment_status", "get_analytics", "list_tags", "upload_image"} {
 		if !names[expected] {
 			t.Fatalf("missing tool: %s", expected)
 		}
+	}
+}
+
+func TestMCPUploadImage(t *testing.T) {
+	store := newMemEntityStore()
+	imageStore, err := NewFileImageStore(t.TempDir(), "/blog/images")
+	if err != nil {
+		t.Fatalf("image store: %v", err)
+	}
+	h, err := NewHandler(Config{Store: store, ImageStore: imageStore})
+	if err != nil {
+		t.Fatalf("handler: %v", err)
+	}
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, httptest.NewRequest(http.MethodPost, "/blog/admin/api/mcp/key", nil))
+	var info map[string]any
+	_ = json.Unmarshal(rr.Body.Bytes(), &info)
+	key, _ := info["api_key"].(string)
+
+	const pixelPNG = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII="
+	resp := mcpRoundtrip(t, h, key, map[string]any{
+		"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+		"params": map[string]any{
+			"name": "upload_image",
+			"arguments": map[string]any{
+				"filename":    "pixel.png",
+				"data_base64": "data:image/png;base64," + pixelPNG,
+				"alt":         "Tiny pixel",
+			},
+		},
+	})
+	text := mcpToolText(t, resp)
+	var uploaded map[string]any
+	if err := json.Unmarshal([]byte(text), &uploaded); err != nil {
+		t.Fatalf("decode upload result: %v", err)
+	}
+	url, _ := uploaded["url"].(string)
+	if !strings.HasPrefix(url, "/blog/images/") || !strings.HasSuffix(url, ".png") {
+		t.Fatalf("url = %q", url)
+	}
+	if got, _ := uploaded["content_type"].(string); got != "image/png" {
+		t.Fatalf("content_type = %q", got)
+	}
+	if got, _ := uploaded["markdown"].(string); got != "![Tiny pixel]("+url+")" {
+		t.Fatalf("markdown = %q", got)
+	}
+
+	rr = httptest.NewRecorder()
+	h.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, url, nil))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("image get status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	if got := rr.Header().Get("Content-Type"); got != "image/png" {
+		t.Fatalf("served content-type = %q", got)
+	}
+	if rr.Body.Len() == 0 {
+		t.Fatalf("served image body is empty")
+	}
+}
+
+func TestMCPUploadImageRequiresImageStore(t *testing.T) {
+	h, _, key := seedMCPHandler(t)
+	resp := mcpRoundtrip(t, h, key, map[string]any{
+		"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+		"params": map[string]any{
+			"name": "upload_image",
+			"arguments": map[string]any{
+				"filename":    "pixel.png",
+				"data_base64": "iVBORw0KGgo=",
+			},
+		},
+	})
+	result, _ := resp.Result.(map[string]any)
+	if isErr, _ := result["isError"].(bool); !isErr {
+		t.Fatalf("expected tool error, got %#v", result)
+	}
+	content, _ := result["content"].([]any)
+	block, _ := content[0].(map[string]any)
+	if text, _ := block["text"].(string); !strings.Contains(text, "image storage not configured") {
+		t.Fatalf("unexpected error text: %q", text)
 	}
 }
 
