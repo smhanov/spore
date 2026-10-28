@@ -376,10 +376,23 @@
               <div class="bg-white border border-slate-200/60 rounded-2xl p-5 shadow-sm space-y-4">
                 <div class="flex items-center justify-between">
                   <h3 class="text-lg font-bold text-slate-900">Smart AI</h3>
-                  <span :class="['text-xs font-semibold px-2 py-1 rounded-full', aiEnabled.smart ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-500']">
-                    {{ aiEnabled.smart ? 'Enabled' : 'Disabled' }}
-                  </span>
+                  <div class="flex items-center gap-2">
+                    <button @click="testAISettings('smart')" :disabled="aiValidate.smart?.loading"
+                      :class="['text-xs font-semibold px-3 py-1.5 rounded-lg border transition-all flex items-center gap-1.5', aiValidate.smart?.loading ? 'border-slate-200 text-slate-400 cursor-not-allowed' : 'border-slate-200 text-slate-600 hover:border-brand-500 hover:text-brand-600']">
+                      <i v-if="aiValidate.smart?.loading" class="ph ph-spinner animate-spin"></i>
+                      <i v-else class="ph ph-broadcast"></i>
+                      {{ aiValidate.smart?.loading ? 'Testing...' : 'Test' }}
+                    </button>
+                    <span :class="['text-xs font-semibold px-2 py-1 rounded-full', aiEnabled.smart ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-500']">
+                      {{ aiEnabled.smart ? 'Enabled' : 'Disabled' }}
+                    </span>
+                  </div>
                 </div>
+
+                <p v-if="aiValidate.smart && !aiValidate.smart.loading" :class="['text-xs break-words', aiValidate.smart.ok ? 'text-emerald-600' : 'text-red-600']">
+                  <template v-if="aiValidate.smart.ok">OK · {{ aiValidate.smart.duration_ms }} ms · replied "{{ aiValidate.smart.response }}"</template>
+                  <template v-else>{{ aiValidate.smart.error || 'Test failed' }}</template>
+                </p>
 
                 <p class="text-xs text-slate-500">Used to write or edit posts.</p>
 
@@ -424,10 +437,23 @@
               <div class="bg-white border border-slate-200/60 rounded-2xl p-5 shadow-sm space-y-4">
                 <div class="flex items-center justify-between">
                   <h3 class="text-lg font-bold text-slate-900">Dumb AI</h3>
-                  <span :class="['text-xs font-semibold px-2 py-1 rounded-full', aiEnabled.dumb ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-500']">
-                    {{ aiEnabled.dumb ? 'Enabled' : 'Disabled' }}
-                  </span>
+                  <div class="flex items-center gap-2">
+                    <button @click="testAISettings('dumb')" :disabled="aiValidate.dumb?.loading"
+                      :class="['text-xs font-semibold px-3 py-1.5 rounded-lg border transition-all flex items-center gap-1.5', aiValidate.dumb?.loading ? 'border-slate-200 text-slate-400 cursor-not-allowed' : 'border-slate-200 text-slate-600 hover:border-brand-500 hover:text-brand-600']">
+                      <i v-if="aiValidate.dumb?.loading" class="ph ph-spinner animate-spin"></i>
+                      <i v-else class="ph ph-broadcast"></i>
+                      {{ aiValidate.dumb?.loading ? 'Testing...' : 'Test' }}
+                    </button>
+                    <span :class="['text-xs font-semibold px-2 py-1 rounded-full', aiEnabled.dumb ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-500']">
+                      {{ aiEnabled.dumb ? 'Enabled' : 'Disabled' }}
+                    </span>
+                  </div>
                 </div>
+
+                <p v-if="aiValidate.dumb && !aiValidate.dumb.loading" :class="['text-xs break-words', aiValidate.dumb.ok ? 'text-emerald-600' : 'text-red-600']">
+                  <template v-if="aiValidate.dumb.ok">OK · {{ aiValidate.dumb.duration_ms }} ms · replied "{{ aiValidate.dumb.response }}"</template>
+                  <template v-else>{{ aiValidate.dumb.error || 'Test failed' }}</template>
+                </p>
 
                 <div class="flex items-center justify-between gap-3">
                   <p class="text-xs text-slate-500">Used for spam detection, quick rewrites, and simple edits.</p>
@@ -914,7 +940,7 @@
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
-import { listPosts, createPost, updatePost, deletePost, getAISettings, updateAISettings, sendAIChat, getBlogSettings, updateBlogSettings, listComments, updateCommentStatus, deleteComment, exportWXR, importWXR, getNotificationConfig, subscribeToNotifications, unsubscribeFromNotifications, getAnalytics, getMCPInfo, generateMCPKey, revokeMCPKey } from './api'
+import { listPosts, createPost, updatePost, deletePost, getAISettings, updateAISettings, sendAIChat, validateAISettings, getBlogSettings, updateBlogSettings, listComments, updateCommentStatus, deleteComment, exportWXR, importWXR, getNotificationConfig, subscribeToNotifications, unsubscribeFromNotifications, getAnalytics, getMCPInfo, generateMCPKey, revokeMCPKey } from './api'
 import MarkdownEditor from './components/MarkdownEditor.vue'
 
 // --- State ---
@@ -931,6 +957,7 @@ const aiSettings = ref(defaultAISettings())
 const aiEnabled = ref({ smart: false, dumb: false })
 const aiLoading = ref(false)
 const aiSaving = ref(false)
+const aiValidate = ref({ smart: null, dumb: null })
 const aiMode = ref('smart')
 const aiQuery = ref('')
 const aiBusy = ref(false)
@@ -1246,6 +1273,26 @@ async function saveAISettings() {
     showToast('Failed to save AI settings: ' + err.message, 'error')
   } finally {
     aiSaving.value = false
+  }
+}
+
+// Smoke-tests the current form values for one slot without saving anything.
+async function testAISettings(slot) {
+  aiValidate.value = { ...aiValidate.value, [slot]: { loading: true } }
+  try {
+    const result = await validateAISettings(slot, normalizeAISettings(aiSettings.value))
+    aiValidate.value = {
+      ...aiValidate.value,
+      [slot]: {
+        loading: false,
+        ok: !!result?.ok,
+        duration_ms: result?.duration_ms || 0,
+        response: result?.response || '',
+        error: result?.error || ''
+      }
+    }
+  } catch (err) {
+    aiValidate.value = { ...aiValidate.value, [slot]: { loading: false, ok: false, duration_ms: 0, response: '', error: err.message } }
   }
 }
 

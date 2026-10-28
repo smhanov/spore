@@ -92,6 +92,13 @@ export async function sendAIChat(data) {
   return jsonRequest(`${base}/api/ai/chat`, { method: 'POST', body: JSON.stringify(data) })
 }
 
+// Smoke-tests the given slot with the settings currently in the form.
+// Provider/network failures come back as HTTP 200 with { ok: false, error },
+// so this does not throw on a failed validation; only malformed input (400) throws.
+export async function validateAISettings(slot, settings) {
+  return jsonRequest(`${base}/api/ai/validate`, { method: 'POST', body: JSON.stringify({ slot, settings }) })
+}
+
 // WXR import/export
 export async function exportWXR() {
   const res = await fetch(`${base}/api/wxr/export`)

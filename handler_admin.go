@@ -34,6 +34,7 @@ func (s *service) mountAdminRoutes(r chi.Router) {
 		r.Get("/ai/settings", s.handleAdminGetAISettings)
 		r.Put("/ai/settings", s.handleAdminUpdateAISettings)
 		r.Post("/ai/chat", s.handleAdminAIChat)
+		r.Post("/ai/validate", s.handleAdminValidateAI)
 
 		r.Get("/wxr/export", s.handleAdminExportWXR)
 		r.Post("/wxr/import", s.handleAdminImportWXR)

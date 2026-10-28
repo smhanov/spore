@@ -134,6 +134,95 @@ func (s *service) handleAdminAIChat(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+type aiValidateRequest struct {
+	Slot     string     `json:"slot"`
+	Settings AISettings `json:"settings"`
+}
+
+type aiValidateResponse struct {
+	OK         bool   `json:"ok"`
+	DurationMS int64  `json:"duration_ms"`
+	Response   string `json:"response,omitempty"`
+	Error      string `json:"error,omitempty"`
+}
+
+// handleAdminValidateAI smoke-tests the provider settings currently typed in
+// the form (not the saved ones) by sending a tiny prompt. Provider and network
+// failures are reported as HTTP 200 with ok:false so the UI can render them
+// inline; only malformed input yields a 4xx response.
+func (s *service) handleAdminValidateAI(w http.ResponseWriter, r *http.Request) {
+	var req aiValidateRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid json", http.StatusBadRequest)
+		return
+	}
+	slot := strings.ToLower(strings.TrimSpace(req.Slot))
+	if slot != "smart" && slot != "dumb" {
+		http.Error(w, "slot must be smart or dumb", http.StatusBadRequest)
+		return
+	}
+
+	var providerSettings AIProviderSettings
+	if slot == "dumb" {
+		providerSettings = req.Settings.Dumb
+	} else {
+		providerSettings = req.Settings.Smart
+	}
+
+	if !aiProviderConfigured(providerSettings) {
+		writeJSON(w, aiValidateResponse{Error: "provider, model, or api key missing"})
+		return
+	}
+
+	client, err := newLLMClient(providerSettings, false)
+	if err != nil {
+		log.Printf("ai validate slot=%s provider=%s model=%s duration=0s ok=false err=%v",
+			slot,
+			strings.ToLower(strings.TrimSpace(providerSettings.Provider)),
+			strings.TrimSpace(providerSettings.Model),
+			err,
+		)
+		writeJSON(w, aiValidateResponse{Error: err.Error()})
+		return
+	}
+
+	prompt := []*llmhub.Message{
+		llmhub.NewSystemMessage(llmhub.Text("You are a connectivity test. Follow the user instruction exactly.")),
+		llmhub.NewUserMessage(llmhub.Text("Reply with exactly: ok")),
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	defer cancel()
+
+	start := time.Now()
+	resp, err := client.Generate(ctx, prompt)
+	duration := time.Since(start)
+	if err != nil {
+		log.Printf("ai validate slot=%s provider=%s model=%s duration=%s ok=false err=%v",
+			slot,
+			strings.ToLower(strings.TrimSpace(providerSettings.Provider)),
+			strings.TrimSpace(providerSettings.Model),
+			duration,
+			err,
+		)
+		writeJSON(w, aiValidateResponse{Error: fmt.Sprintf("%v", err)})
+		return
+	}
+
+	log.Printf("ai validate slot=%s provider=%s model=%s duration=%s ok=true",
+		slot,
+		strings.ToLower(strings.TrimSpace(providerSettings.Provider)),
+		strings.TrimSpace(providerSettings.Model),
+		duration,
+	)
+
+	writeJSON(w, aiValidateResponse{
+		OK:         true,
+		DurationMS: duration.Milliseconds(),
+		Response:   trimToLength(strings.TrimSpace(stripThinkTags(resp.Text())), 120),
+	})
+}
+
 func aiProviderConfigured(settings AIProviderSettings) bool {
 	if strings.TrimSpace(settings.Provider) == "" || strings.TrimSpace(settings.Model) == "" {
 		return false
