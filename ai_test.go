@@ -2,12 +2,16 @@ package blog
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/smhanov/llmhub"
 )
 
 // validateStubServer is an OpenAI-compatible chat-completions stub that always
@@ -209,4 +213,112 @@ func TestAdminValidateAIUsesPostedSettings(t *testing.T) {
 	if stub.requestCount() != 1 {
 		t.Fatalf("expected exactly one stub call, saw %d", stub.requestCount())
 	}
+}
+
+// geminiStubServer captures the JSON bodies POSTed to the Gemini
+// generateContent endpoint and always replies with a minimal valid response.
+type geminiStubServer struct {
+	mu     sync.Mutex
+	bodies []map[string]any
+	srv    *httptest.Server
+}
+
+func newGeminiStubServer(t *testing.T) *geminiStubServer {
+	t.Helper()
+	stub := &geminiStubServer{}
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		if !strings.HasSuffix(r.URL.Path, ":generateContent") {
+			http.NotFound(w, r)
+			return
+		}
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			http.Error(w, "bad json", http.StatusBadRequest)
+			return
+		}
+		stub.mu.Lock()
+		stub.bodies = append(stub.bodies, body)
+		stub.mu.Unlock()
+
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"candidates": []map[string]any{
+				{"content": map[string]any{"parts": []map[string]any{{"text": "ok"}}}},
+			},
+		})
+	})
+	stub.srv = httptest.NewServer(mux)
+	t.Cleanup(stub.srv.Close)
+	return stub
+}
+
+func (s *geminiStubServer) requestBodies() []map[string]any {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]map[string]any(nil), s.bodies...)
+}
+
+// TestNewLLMClientGeminiWebSearchFlag drives newLLMClient against a Gemini stub
+// and inspects the outgoing request body: the google_search grounding tool must
+// appear only when the webSearch flag is true.
+func TestNewLLMClientGeminiWebSearchFlag(t *testing.T) {
+	stub := newGeminiStubServer(t)
+	prompt := []*llmhub.Message{
+		llmhub.NewSystemMessage(llmhub.Text("You are a connectivity test.")),
+		llmhub.NewUserMessage(llmhub.Text("Reply with exactly: ok")),
+	}
+	settings := AIProviderSettings{
+		Provider: "gemini",
+		Model:    "gemini-2.0-flash",
+		APIKey:   "stub-key",
+		BaseURL:  stub.srv.URL,
+	}
+
+	t.Run("web search off", func(t *testing.T) {
+		client, err := newLLMClient(settings, false)
+		if err != nil {
+			t.Fatalf("newLLMClient: %v", err)
+		}
+		if _, err := client.Generate(context.Background(), prompt); err != nil {
+			t.Fatalf("generate: %v", err)
+		}
+
+		bodies := stub.requestBodies()
+		if len(bodies) != 1 {
+			t.Fatalf("expected 1 stub call, saw %d", len(bodies))
+		}
+		if _, ok := bodies[0]["contents"]; !ok {
+			t.Fatalf("expected contents in gemini request body: %v", bodies[0])
+		}
+		if _, ok := bodies[0]["tools"]; ok {
+			t.Fatalf("webSearch=false must not send a grounding tool, body: %v", bodies[0])
+		}
+	})
+
+	t.Run("web search on", func(t *testing.T) {
+		client, err := newLLMClient(settings, true)
+		if err != nil {
+			t.Fatalf("newLLMClient: %v", err)
+		}
+		if _, err := client.Generate(context.Background(), prompt); err != nil {
+			t.Fatalf("generate: %v", err)
+		}
+
+		bodies := stub.requestBodies()
+		if len(bodies) != 2 {
+			t.Fatalf("expected 2 stub calls, saw %d", len(bodies))
+		}
+		tools, ok := bodies[1]["tools"].([]any)
+		if !ok || len(tools) == 0 {
+			t.Fatalf("webSearch=true must send a tools option, body: %v", bodies[1])
+		}
+		tool, ok := tools[0].(map[string]any)
+		if !ok {
+			t.Fatalf("unexpected tools shape: %v", bodies[1]["tools"])
+		}
+		if _, ok := tool["google_search"]; !ok {
+			t.Fatalf("expected google_search grounding tool, got: %v", bodies[1]["tools"])
+		}
+	})
 }

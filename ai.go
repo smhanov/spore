@@ -277,9 +277,6 @@ func newLLMClient(settings AIProviderSettings, webSearch bool) (*llmhub.Client, 
 	if webSearch && supportsWebSearch(settings.Provider) {
 		opts = append(opts, llmhub.WithWebSearch(true))
 	}
-	if supportsWebSearch(settings.Provider) {
-		opts = append(opts, llmhub.WithWebSearch(true))
-	}
 
 	return llmhub.New(settings.Provider, settings.APIKey, opts...)
 }
