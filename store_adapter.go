@@ -1073,10 +1073,13 @@ func sortPostsForAdmin(posts []Post) []Post {
 }
 
 func adminSortTime(post Post) time.Time {
+	if post.UpdatedAt != nil {
+		return post.UpdatedAt.UTC()
+	}
 	if post.PublishedAt != nil {
 		return post.PublishedAt.UTC()
 	}
-	return time.Date(9999, 12, 31, 0, 0, 0, 0, time.UTC)
+	return time.Time{}
 }
 
 func slicePosts(posts []Post, limit, offset int) []Post {
