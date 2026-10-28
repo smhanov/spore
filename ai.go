@@ -58,6 +58,7 @@ func (s *service) handleAdminUpdateAISettings(w http.ResponseWriter, r *http.Req
 		return
 	}
 	s.queuePostProcessing("ai settings updated")
+	s.queueSpamRecheck("ai settings updated")
 	writeJSON(w, aiSettingsResponse{
 		Settings:     payload,
 		SmartEnabled: aiProviderConfigured(payload.Smart),
@@ -339,6 +340,25 @@ func (s *service) checkCommentSpam(ctx context.Context, comment Comment, post Po
 
 	spam, reason := parseCommentSpamResponse(resp.Text())
 	return spam, reason, nil
+}
+
+// commentNeedsSpamCheck reports whether an approved comment still deserves a
+// spam check: it was either never checked (created while no LLM was
+// configured) or its last check failed (failure marker present). Human
+// moderation stamps SpamCheckedAt and clears SpamReason, so those comments
+// are skipped. Pending comments are always eligible and are handled
+// separately.
+func commentNeedsSpamCheck(c Comment) bool {
+	if c.SpamCheckedAt == nil {
+		return true
+	}
+	return strings.TrimSpace(valueOrEmpty(c.SpamReason)) != ""
+}
+
+// spamCheckFailureReason builds the marker reason stored on a comment whose
+// spam check could not run, keeping it eligible for a later spam re-check.
+func spamCheckFailureReason(err error) string {
+	return trimToLength("ai check failed: "+err.Error(), 500)
 }
 
 func buildCommentSpamPrompt(comment Comment, post Post) []*llmhub.Message {

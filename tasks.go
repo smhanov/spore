@@ -28,6 +28,13 @@ const (
 	TaskTypeGenerateTags        = "generate_tags"
 	TaskTypePostProcessing      = "post_processing"
 	TaskTypeImportImages        = "import_images"
+	TaskTypeSpamRecheck         = "spam_recheck"
+
+	// spamRecheckPageSize is the ListCommentsForModeration page size used
+	// while enumerating comments for a spam re-check.
+	spamRecheckPageSize = 200
+	// spamRecheckMaxComments bounds a single spam_recheck run.
+	spamRecheckMaxComments = 1000
 )
 
 // ---------------------------------------------------------------------------
@@ -112,6 +119,8 @@ func (tr *taskRunner) processTask(ctx context.Context, task Task) {
 		err = tr.svc.processPostProcessing(ctx, &task)
 	case TaskTypeImportImages:
 		err = tr.svc.processImportImages(ctx, &task)
+	case TaskTypeSpamRecheck:
+		err = tr.svc.processSpamRecheck(ctx, &task)
 	default:
 		err = fmt.Errorf("unknown task type: %s", task.TaskType)
 	}
@@ -179,6 +188,22 @@ func (s *service) queuePostProcessing(reason string) {
 	}
 	if err := s.store.CreateTask(context.Background(), &task); err != nil {
 		log.Printf("tasks: queue post processing reason=%s: %v", reason, err)
+		return
+	}
+	s.tasks.nudge()
+}
+
+func (s *service) queueSpamRecheck(reason string) {
+	payload, _ := json.Marshal(map[string]string{"reason": reason})
+	task := Task{
+		ID:       generateID(),
+		TaskType: TaskTypeSpamRecheck,
+		Status:   TaskStatusPending,
+		Payload:  string(payload),
+		Result:   "{}",
+	}
+	if err := s.store.CreateTask(context.Background(), &task); err != nil {
+		log.Printf("tasks: queue spam recheck reason=%s: %v", reason, err)
 		return
 	}
 	s.tasks.nudge()
@@ -296,6 +321,128 @@ func (s *service) processPostProcessing(ctx context.Context, task *Task) error {
 
 	log.Printf("tasks: post-processing done processed=%d descriptions=%d tags=%d", processed, filledDescriptions, filledTags)
 	return nil
+}
+
+// ---------------------------------------------------------------------------
+// Spam re-check (async task)
+// ---------------------------------------------------------------------------
+
+// processSpamRecheck spam-checks every comment that never got a real check
+// (created while no LLM was configured) or whose last check failed. Comments
+// a human explicitly approved are skipped because moderation always stamps
+// SpamCheckedAt and clears SpamReason. Per-comment AI errors are logged and
+// leave a failure marker so a later run retries them; only store-level
+// failures fail the task.
+func (s *service) processSpamRecheck(ctx context.Context, task *Task) error {
+	var payload struct {
+		Reason string `json:"reason"`
+	}
+	_ = json.Unmarshal([]byte(task.Payload), &payload)
+
+	settings, err := s.store.GetAISettings(ctx)
+	if err != nil {
+		return fmt.Errorf("load ai settings: %w", err)
+	}
+	provider := dumbAISettings(settings)
+	if provider == nil {
+		log.Printf("tasks: spam-recheck skipped (ai not configured)")
+		return nil
+	}
+
+	log.Printf(
+		"tasks: spam-recheck start reason=%s provider=%s model=%s",
+		strings.TrimSpace(payload.Reason),
+		strings.ToLower(strings.TrimSpace(provider.Provider)),
+		strings.TrimSpace(provider.Model),
+	)
+
+	// Collect every candidate before checking so verdict writes cannot shift
+	// pagination mid-pass (status changes move comments between filters).
+	var eligible []Comment
+	for _, status := range []string{"approved", "pending"} {
+		comments, err := s.collectSpamRecheckCandidates(ctx, status)
+		if err != nil {
+			return fmt.Errorf("list comments status=%s: %w", status, err)
+		}
+		eligible = append(eligible, comments...)
+	}
+
+	checked := 0
+	for _, comment := range eligible {
+		if checked >= spamRecheckMaxComments {
+			log.Printf("tasks: spam-recheck stopped at cap max=%d", spamRecheckMaxComments)
+			break
+		}
+		checked++
+		s.recheckCommentSpam(ctx, comment)
+	}
+
+	log.Printf("tasks: spam-recheck done checked=%d", checked)
+	return nil
+}
+
+// collectSpamRecheckCandidates pages through comments with the given status
+// and returns those that still need a spam check. Pending comments are always
+// eligible; approved comments must satisfy commentNeedsSpamCheck.
+func (s *service) collectSpamRecheckCandidates(ctx context.Context, status string) ([]Comment, error) {
+	var eligible []Comment
+	offset := 0
+	for {
+		comments, err := s.store.ListCommentsForModeration(ctx, status, spamRecheckPageSize, offset)
+		if err != nil {
+			return nil, err
+		}
+		for _, admin := range comments {
+			if status == "approved" && !commentNeedsSpamCheck(admin.Comment) {
+				continue
+			}
+			eligible = append(eligible, admin.Comment)
+		}
+		if len(comments) < spamRecheckPageSize {
+			break
+		}
+		offset += len(comments)
+	}
+	return eligible, nil
+}
+
+// recheckCommentSpam runs the spam check for one comment and applies the
+// verdict. Missing posts are skipped; check failures keep the comment
+// approved but marked for a later retry.
+func (s *service) recheckCommentSpam(ctx context.Context, comment Comment) {
+	post, err := s.store.GetPostByID(ctx, comment.PostID)
+	if err != nil {
+		log.Printf("tasks: spam-recheck load post failed comment_id=%s post_id=%s err=%v", comment.ID, comment.PostID, err)
+		return
+	}
+	if post == nil {
+		log.Printf("tasks: spam-recheck skipped (post missing) comment_id=%s post_id=%s", comment.ID, comment.PostID)
+		return
+	}
+
+	spam, reason, err := s.checkCommentSpam(context.Background(), comment, *post)
+	if err != nil {
+		failure := spamCheckFailureReason(err)
+		if updateErr := s.store.UpdateCommentStatus(ctx, comment.ID, "approved", &failure); updateErr != nil {
+			log.Printf("tasks: spam-recheck update failed comment_id=%s err=%v", comment.ID, updateErr)
+		}
+		return
+	}
+
+	status := "approved"
+	var storedReason *string
+	if spam {
+		status = "rejected"
+		if strings.TrimSpace(reason) == "" {
+			reason = "flagged as spam"
+		}
+		storedReason = &reason
+	}
+	if updateErr := s.store.UpdateCommentStatus(ctx, comment.ID, status, storedReason); updateErr != nil {
+		log.Printf("tasks: spam-recheck update failed comment_id=%s err=%v", comment.ID, updateErr)
+		return
+	}
+	log.Printf("ai spam-recheck comment_id=%s status=%s", comment.ID, status)
 }
 
 // ---------------------------------------------------------------------------

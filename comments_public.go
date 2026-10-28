@@ -134,7 +134,7 @@ func (s *service) handleCreateComment(w http.ResponseWriter, r *http.Request) {
 	}
 
 	settings, err := s.store.GetAISettings(r.Context())
-	if err == nil && settings != nil && aiProviderConfigured(settings.Dumb) {
+	if err == nil && dumbAISettings(settings) != nil {
 		comment.Status = "pending"
 	}
 	if comment.Status == "" {
@@ -305,7 +305,10 @@ func (s *service) runCommentSpamCheck(comment Comment, post Post) {
 	ctx := context.Background()
 	spam, reason, err := s.checkCommentSpam(ctx, comment, post)
 	if err != nil {
-		_ = s.store.UpdateCommentStatus(ctx, comment.ID, "approved", nil)
+		// Approve but leave a marker reason so a later spam re-check
+		// retries this comment instead of treating it as verified ham.
+		failure := spamCheckFailureReason(err)
+		_ = s.store.UpdateCommentStatus(ctx, comment.ID, "approved", &failure)
 		return
 	}
 	if spam {
